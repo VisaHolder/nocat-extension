@@ -1,0 +1,9 @@
+package-as: nocat.extension
+
+ignore:
+  - .github
+  - .pkgmeta
+  - .gitignore
+  - .gitattributes
+
+# All libs and CanIMogIt are committed directly — no externals needed.

@@ -1,0 +1,37 @@
+MIT License
+
+Copyright (c) 2025 paul
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party code included in this repository:
+
+- libs/LibStub, libs/CallbackHandler-1.0, libs/AceAddon-3.0, libs/AceDB-3.0,
+  libs/AceEvent-3.0, libs/AceLocale-3.0: © Ace3 contributors, MIT License
+  https://www.wowace.com/projects/ace3
+
+- libs/LibDataBroker-1.1: © tekkub, MIT License
+
+- libs/LibDBIcon-1.0: © Elkano, MIT License
+
+- CanIMogIt/: © RoseTwiddler/TorelTwiddler, Ami Yuy, gewoonnico
+  https://www.curseforge.com/wow/addons/can-i-mog-it
+  All rights reserved by original authors. Bundled here with attribution.

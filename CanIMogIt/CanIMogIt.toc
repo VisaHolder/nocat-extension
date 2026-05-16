@@ -1,0 +1,58 @@
+## Interface: 120000
+## Title: Can I Mog It?
+## IconTexture: Interface\Addons\CanIMogIt\Icons\KNOWN
+## Author: RoseTwiddler/TorelTwiddler, Ami Yuy, gewoonnico
+## Version: 12.0.0v2.8.5
+## Category-enUS: Collections
+## Category-deDE: Kriegsmeutesammlungen
+## Category-esES: Colecciones de banda guerrera
+## Category-esMX: Colecciones de tropa
+## Category-frFR: Collections du bataillon
+## Category-itIT: Collezioni della Brigata
+## Category-koKR: 전투부대 수집품
+## Category-ptBR: Coleções do Bando de Guerra
+## Category-ruRU: Коллекции отряда
+## Category-zhCN: 战团藏品
+## Category-zhTW: 戰隊收藏
+## Notes: Adds tooltips to items showing if you have learned a transmog appearance.
+## Notes-deDE: Fügt Gegenständen Tooltips hinzu, ob eine Transmogrifikationsvorlage bereits bekannt ist. 
+## Notes-esES: Añade a la descripción del objeto si se conoce la apariencia.
+## Notes-esMX: Añade información a items para mostrar si ya conoce esa apariencia transfigurable.
+## Notes-frFR: Ajoute des infobulles aux objets indiquant si vous avez appris une apparence de transmogrification.
+## Notes-itIT: Aggiunge un suggerimento, sull'oggetto che stai osservando, se è stato memorizzato nella tua collezione di aspetti.
+## Notes-koKR: 아이템의 형상변환 등록 여부를 툴팁에 표시
+## Notes-ptBR: Adiciona dicas nos itens mostrando se você aprendeu uma aparência de transmog.
+## Notes-ruRU: Добавляет предметам подсказку, показывающую, изучен предмет для трансмогрификации или нет.
+## Notes-zhCN: 物品信息显示你是否已解锁幻化外观
+## Notes-zhTW: 加入到物品提示顯示你已經收藏一個塑形外觀
+## X-Category: Transmogrify
+## X-Website: https://www.curseforge.com/wow/addons/can-i-mog-it
+## X-Curse-Project-ID: 100617
+## X-WoWI-ID: 24015
+## X-Wago-ID: Qb6mg9GP
+## SavedVariables: CanIMogItOptions
+## OptionalDeps: AdiBags, ArkInventory, ElvUI, LiteBag, Bagnon, cargBags_Nivaya, Auctionator
+embeds.xml
+core.lua
+Locale\_locales.xml
+constants.lua
+classes\appearanceData.lua
+classes\bindData.lua
+classes\itemData.lua
+options.lua
+events.lua
+cache.lua
+requirements.lua
+code.lua
+tooltips.lua
+database.lua
+tooltipScanner.lua
+mounts.lua
+toys.lua
+pets.lua
+ensembles.lua
+catalyze.lua
+decor.lua
+Overlay\_overlays.xml
+Plugins\_plugins.xml
+tests.lua
