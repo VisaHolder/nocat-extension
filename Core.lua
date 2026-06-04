@@ -13,10 +13,6 @@ local DB_DEFAULTS = {
             -- Otherwise this is a specific pet GUID (string) to always summon.
             selected = nil,
         },
-        -- Map Zoom
-        zoom = {
-            follow = false,
-        },
         -- Kill Tracker
         tracker = {
             killCount     = {},
@@ -26,7 +22,9 @@ local DB_DEFAULTS = {
             threshold     = 1000,
             print         = false,
             printnew      = false,
-            countmode     = false,
+            pvp           = false,
+            pvpKills      = 0,
+            pvpByName     = {},
             tooltip       = false,
             showexp       = false,
             disableDungeons = false,
@@ -39,6 +37,11 @@ local DB_DEFAULTS = {
         unsheathe = {
             enabled  = false,
             inCities = false,
+            -- Which stance the addon enforces: 'drawn' (keep weapon out) or
+            -- 'sheathed' (keep weapon put away). Melee-vs-ranged pose is NOT
+            -- selectable — the WoW API has no SetSheathState; ToggleSheath only
+            -- flips drawn/sheathed and the game picks the weapon.
+            stance   = 'drawn',
         },
         loadmessage   = false,
         firstLoad     = true,
@@ -48,6 +51,8 @@ local DB_DEFAULTS = {
     char = {
         tracker = {
             killCount = {},
+            pvpKills  = 0,
+            pvpByName = {},
         },
         unsheathe = {
             specs = {},
@@ -73,8 +78,33 @@ end
 
 function NCE:npcFromGUID(guid)
     if not guid then return nil end
-    local t, _, _, _, _, id = strsplit('-', guid)
-    if t == 'Creature' or t == 'Vehicle' then return tonumber(id) end
+    local ok, t, _, _, _, _, id = pcall(strsplit, '-', guid)
+    if not ok then return nil end
+    if t == 'Creature' or t == 'Vehicle' or t == 'Pet' then return tonumber(id) end
+end
+
+-- Resolve an NPC name from a GUID by scanning unit tokens that might still
+-- hold the unit. Used as a fallback when PARTY_KILL fires for an unseen mob
+-- and CLEU UNIT_DIED (which carries dstName) doesn't fire on this client.
+local NAME_TOKENS = { 'target', 'mouseover', 'targettarget', 'focus', 'softenemy' }
+function NCE:resolveNpcName(guid)
+    if not guid then return nil end
+    for _, tok in ipairs(NAME_TOKENS) do
+        local ok1, g = pcall(UnitGUID, tok)
+        if ok1 and g == guid then
+            local ok2, n = pcall(UnitName, tok)
+            if ok2 and n and n ~= '' then return n end
+        end
+    end
+    for i = 1, 10 do
+        local tok = 'nameplate' .. i
+        local ok1, g = pcall(UnitGUID, tok)
+        if ok1 and g == guid then
+            local ok2, n = pcall(UnitName, tok)
+            if ok2 and n and n ~= '' then return n end
+        end
+    end
+    return nil
 end
 
 function NCE:GetGlobalCount(id)
@@ -102,18 +132,38 @@ function NCE:SessionKPM()
     return e > 0 and self.session.kills / e * 60 or 0
 end
 
+-- Returns true if this GUID is a fresh kill (not seen in the last 1s) and
+-- records it in the dedup table. Returns false if it's a duplicate.
+-- Every 64 fresh kills, sweeps entries older than 5s out of the table so
+-- it stays bounded across long farming sessions.
+function NCE:dedupKill(guid, now)
+    local recent = self.recentKills
+    local prev = recent[guid]
+    if prev and (now - prev) < 1 then return false end
+    recent[guid] = now
+
+    self._dedupCount = (self._dedupCount or 0) + 1
+    if self._dedupCount >= 64 then
+        self._dedupCount = 0
+        local cutoff = now - 5
+        for g, t in pairs(recent) do
+            if t < cutoff then recent[g] = nil end
+        end
+    end
+    return true
+end
+
 -- ── Init ──────────────────────────────────────────────────────────────────────
 function NCE:OnInitialize()
     self.db             = LibStub('AceDB-3.0'):New('NocatExtensionDB', DB_DEFAULTS)
-    self.mobHitCache    = {}
-    self.session        = { kills = 0, start = GetTime() }
+    self.recentKills    = {}   -- guid → timestamp, dedup across CLEU + PARTY_KILL
+    self.session        = { kills = 0, pvpKills = 0, start = GetTime() }
     self.lastKilledID   = nil
     self.lastKilledName = nil
     self.lastKillTime   = 0
     self.trackingEnabled = true
     self.playerGUID     = UnitGUID('player')
-    self._diag          = { events = 0, hits = 0, deaths = 0, kills = 0, partyKillEvents = 0, lastEvent = '', lastDst = '', lastError = nil }
-    self._lastCleuTime  = 0
+    self._diag          = { events = 0, deaths = 0, kills = 0, partyKillEvents = 0, lastEvent = '', lastDst = '', lastError = nil }
 
     -- COMBAT_LOG_EVENT_UNFILTERED via AceEvent. On this user's client, CLEU
     -- registration silently fails (verified: AceEvent.frame:IsEventRegistered
@@ -124,35 +174,48 @@ function NCE:OnInitialize()
     -- when it doesn't, the PARTY_KILL handler below picks up the slack.
     self:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED', function()
         if NCE._diag then NCE._diag.events = NCE._diag.events + 1 end
-        NCE._lastCleuTime = GetTime()
         local ok, err = pcall(NCE.OnCombatLog, NCE, CombatLogGetCurrentEventInfo())
         if not ok and NCE._diag then NCE._diag.lastError = tostring(err) end
     end)
 
-    -- PARTY_KILL fallback. Fires on every kill the player (or their pet)
-    -- delivers the killing blow on, with the victim's GUID right in the
-    -- args — no hit cache needed. Despite the name it's primarily a
-    -- player-credit event in retail.
-    --
-    -- Dedup against CLEU: if CLEU is active (any event in the last 5s),
-    -- skip — CLEU's UNIT_DIED + mobHitCache path will record the kill.
-    -- Only when CLEU is genuinely silent does PARTY_KILL record directly.
+    -- PARTY_KILL fires for every kill the player or party/raid gets credit for,
+    -- including PvP kills. Always active — dedup per-GUID against CLEU so kills
+    -- aren't double-counted when both paths fire for the same victim.
     self:RegisterEvent('PARTY_KILL', function(_, killerGUID, killedGUID)
         if NCE._diag then NCE._diag.partyKillEvents = (NCE._diag.partyKillEvents or 0) + 1 end
         if not NCE.trackingEnabled then return end
         if not killedGUID then return end
-        if GetTime() - (NCE._lastCleuTime or 0) < 5 then return end
+        local now = GetTime()
         local id = NCE:npcFromGUID(killedGUID)
-        if not id then return end
-        local name = NCE.db.global.tracker.mobNames and NCE.db.global.tracker.mobNames[id]
-        NCE:RecordKill(id, name)
+        if id then
+            local name = (NCE.db.global.tracker.mobNames and NCE.db.global.tracker.mobNames[id])
+                or NCE:resolveNpcName(killedGUID)
+            -- Update credit BEFORE dedup so a CLEU PARTY_KILL subevent race
+            -- that already counted this kill can't suppress credit attribution.
+            NCE.lastKilledID   = id
+            NCE.lastKilledName = name
+            NCE.lastKillTime   = now
+            if NCE:dedupKill(killedGUID, now) then
+                NCE:RecordKill(id, name)
+            end
+            return
+        end
+        -- PvP fallback: PARTY_KILL gives credited player kills even when CLEU
+        -- silently fails on this client. Resolve the victim's name via GUID
+        -- since PARTY_KILL doesn't pass a name argument.
+        if not NCE.db.global.tracker.pvp then return end
+        local ok, t = pcall(strsplit, '-', killedGUID)
+        if not ok or t ~= 'Player' then return end
+        if not NCE:dedupKill(killedGUID, now) then return end
+        local pOk, _, _, _, _, _, pname = pcall(GetPlayerInfoByGUID, killedGUID)
+        NCE:RecordPvPKill((pOk and pname) or nil)
     end)
 
     -- Only wipe hitcache on actual world transitions, not subzone changes
     -- (ZONE_CHANGED_NEW_AREA fires for subzone borders and would drop mid-combat hits)
     self:RegisterEvent('PLAYER_ENTERING_WORLD', function()
         NCE.playerGUID  = UnitGUID('player')
-        NCE.mobHitCache = {}
+        NCE.recentKills = {}
     end)
     self:RegisterEvent('ENCOUNTER_START', function(_, _, _, _, size)
         local t = NCE.db.global.tracker
@@ -164,7 +227,7 @@ function NCE:OnInitialize()
         local t = NCE.db.global.tracker
         if (t.disableDungeons and size <= 5) or (t.disableRaids and size > 5) then
             NCE.trackingEnabled = true
-            NCE.mobHitCache = {}
+            NCE.recentKills = {}
         end
     end)
 
@@ -195,43 +258,24 @@ function NCE:OnInitialize()
         end
     end)
 
-    -- CanIMogIt is bundled inside nocat. If the user also has the standalone
-    -- addon enabled the global `CanIMogIt` is taken and our embedded copy
-    -- errors out. Print a chat warning — we intentionally avoid StaticPopup
-    -- and AddonList:Show() here: both are well-known sources of UI taint in
-    -- TWW (the latter calls Show on a secure-protected frame from addon code,
-    -- which contaminates the Communities/Social UI's call stack and breaks
-    -- secure dialogs like INVITE_COMMUNITY_MEMBER_WITH_INVITE_LINK).
-    if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded('CanIMogIt') then
-        self:Msg('|cffff5555Conflict:|r the standalone "Can I Mog It?" addon is enabled.')
-        self:Msg('  nocat includes CanIMogIt internally — open the game menu → AddOns,')
-        self:Msg('  uncheck "Can I Mog It?", and /reload.')
+    -- Per-init pcall guards: a single init throwing must not skip the rest.
+    -- Errors are captured into NCE._initErrors so /nocat debug can show them
+    -- (otherwise a silent failure here cascades into "minimap gone, slash dead,
+    -- panel won't open" with no on-screen sign of what broke).
+    NCE._initErrors = {}
+    local function _runInit(name, fn)
+        if not fn then return end
+        local ok, err = pcall(fn, NCE)
+        if not ok then NCE._initErrors[name] = tostring(err) end
     end
-
-    -- Strip CanIMogIt's slash commands. The embedded engine registers `/cimi`
-    -- and `/canimogit` via AceConsole — we want users to drive everything from
-    -- `/nocat` instead, so unregister those commands now that registration is
-    -- complete (it ran during file load, well before OnEnable).
-    if _G.CanIMogIt and _G.CanIMogIt.UnregisterChatCommand then
-        pcall(_G.CanIMogIt.UnregisterChatCommand, _G.CanIMogIt, 'cimi')
-        pcall(_G.CanIMogIt.UnregisterChatCommand, _G.CanIMogIt, 'canimogit')
-    end
-
-    -- Baganator embeds a CanIMogIt corner-widget registration that only fires
-    -- when the standalone CanIMogIt addon emits ADDON_LOADED. Since we ship
-    -- CanIMogIt's files inside nocat, that event never fires — so we replay
-    -- the registration ourselves with Baganator's public API.
-    if NCE.InitBaganatorBridge then NCE:InitBaganatorBridge() end
-
-    if NCE.InitWeapon         then NCE:InitWeapon()          end
-    if NCE.InitPetCompanion   then NCE:InitPetCompanion()   end
-    if NCE.InitMapZoom        then NCE:InitMapZoom()         end
-    if NCE.InitMobList        then NCE:InitMobList()         end
-    if NCE.InitTimer          then NCE:InitTimer()           end
-    if NCE.InitImmediate      then NCE:InitImmediate()       end
-    if NCE.InitExpTracker     then NCE:InitExpTracker()      end
-    if NCE.InitOptions        then NCE:InitOptions()         end
-    if NCE.InitMinimapButton  then NCE:InitMinimapButton()   end
+    _runInit('Weapon',        NCE.InitWeapon)
+    _runInit('PetCompanion',  NCE.InitPetCompanion)
+    _runInit('MobList',       NCE.InitMobList)
+    _runInit('Timer',         NCE.InitTimer)
+    _runInit('Immediate',     NCE.InitImmediate)
+    _runInit('ExpTracker',    NCE.InitExpTracker)
+    _runInit('Options',       NCE.InitOptions)
+    _runInit('MinimapButton', NCE.InitMinimapButton)
 
     if self.db.global.loadmessage then
         self:Msg('Loaded. Type /nocat to open settings, /nocat help for commands.')
@@ -242,73 +286,65 @@ function NCE:OnInitialize()
     end
 end
 
--- Lookup table: O(1) vs 4 regex calls per combat event
-local HIT_EVENTS = {
-    SWING_DAMAGE          = true, RANGE_DAMAGE            = true,
-    SPELL_DAMAGE          = true, SPELL_PERIODIC_DAMAGE   = true,
-    ENVIRONMENTAL_DAMAGE  = true, SPELL_INSTAKILL         = true,
-    SPELL_DRAIN           = true, SPELL_LEECH             = true,
-    DAMAGE_SHIELD         = true, -- mob attacks player, dies from thorns/shield reflection
-}
-
 -- ── Combat log ────────────────────────────────────────────────────────────────
--- Combat log object flag bits used to detect player-controlled sources without
--- depending on GUID equality (GUID can drift across reloads/login races).
-local OBJ_AFFIL_MINE  = 0x00000001  -- COMBATLOG_OBJECT_AFFILIATION_MINE
-local OBJ_AFFIL_PARTY = 0x00000002
-local OBJ_AFFIL_RAID  = 0x00000004
-
-function NCE:OnCombatLog(ts, event, _, srcGUID, srcName, srcFlags, _,
-                          dstGUID, dstName)
+function NCE:OnCombatLog(_, event, _, _, _, _, _, dstGUID, dstName)
     local d = self._diag
     if d then d.lastEvent = event or '?' end
 
     if not self.trackingEnabled then return end
-    if not self.playerGUID then self.playerGUID = UnitGUID('player') end
 
-    local isDeath = (event == 'UNIT_DIED' or event == 'PARTY_KILL')
-    if not isDeath and not HIT_EVENTS[event] then return end  -- skip irrelevant events early
+    if event ~= 'UNIT_DIED' and event ~= 'UNIT_DESTROYED' and event ~= 'PARTY_KILL' then return end
 
     if not dstGUID then return end
-    if d then d.lastDst = dstName or '?' end
+    if d then d.lastDst = dstName or '?'; d.deaths = (d.deaths or 0) + 1 end
 
-    if isDeath then
-        if d then d.deaths = d.deaths + 1 end
-        if self.mobHitCache[dstGUID] then
-            local id = self:npcFromGUID(dstGUID)
-            if id then
-                self.mobHitCache[dstGUID] = nil
-                if d then d.kills = d.kills + 1 end
-                self:RecordKill(id, dstName)
-            end
-        end
+    local now = GetTime()
+    local id = self:npcFromGUID(dstGUID)
+    if not id then
+        if not self.db.global.tracker.pvp then return end
+        local ok, t = pcall(strsplit, '-', dstGUID)
+        if not ok or t ~= 'Player' then return end
+        if not self:dedupKill(dstGUID, now) then return end
+        self:RecordPvPKill(dstName)
         return
     end
 
-    -- hit event — only parse GUID and check source if we care about this dst
-    local id = self:npcFromGUID(dstGUID)
-    if not id then return end
-
-    -- Player-controlled source detection: trust combat log flags first (most
-    -- reliable, works even if our cached playerGUID is stale), GUID compare second.
-    local mine = srcFlags and bit.band(srcFlags, OBJ_AFFIL_MINE) ~= 0
-    local isPlayer = mine or srcGUID == self.playerGUID or srcGUID == UnitGUID('pet')
-
-    if not isPlayer and self.db.global.tracker.countmode then
-        local groupBit = srcFlags and bit.band(srcFlags, OBJ_AFFIL_PARTY + OBJ_AFFIL_RAID) ~= 0
-        isPlayer = groupBit or (IsGuidInGroup and srcGUID and IsGuidInGroup(srcGUID)) or false
-        if not isPlayer and srcName then
-            isPlayer = (UnitInRaid(srcName) ~= nil) or (UnitInParty(srcName) and true or false)
-        end
+    -- CLEU PARTY_KILL subevent indicates the player/party got credit. Update
+    -- credit BEFORE dedup so a PARTY_KILL game event race can't suppress it.
+    -- UNIT_DIED/UNIT_DESTROYED are uncredited (could be critters, ambient mobs)
+    -- and intentionally don't update lastKilledID, so XP attribution stays
+    -- pinned to the last actually-credited kill.
+    if event == 'PARTY_KILL' then
+        self.lastKilledID   = id
+        self.lastKilledName = dstName or (self.db.global.tracker.mobNames and self.db.global.tracker.mobNames[id])
+        self.lastKillTime   = now
     end
 
-    if isPlayer then
-        if d then d.hits = d.hits + 1 end
-        self.mobHitCache[dstGUID] = true
+    if not self:dedupKill(dstGUID, now) then return end
+    if d then d.kills = (d.kills or 0) + 1 end
+    self:RecordKill(id, dstName)
+end
+
+-- ── PvP kill recording ────────────────────────────────────────────────────────
+function NCE:RecordPvPKill(name)
+    local t  = self.db.global.tracker
+    local ch = self.db.char.tracker
+    name = name or 'Unknown'
+    t.pvpKills               = (t.pvpKills  or 0) + 1
+    ch.pvpKills              = (ch.pvpKills or 0) + 1
+    t.pvpByName[name]        = (t.pvpByName[name]  or 0) + 1
+    ch.pvpByName[name]       = (ch.pvpByName[name] or 0) + 1
+    self.session.pvpKills    = (self.session.pvpKills or 0) + 1
+    if t.print then
+        self:Msg(string.format('PvP kill: %s  (total: %s)', name, self:commas(t.pvpKills)))
     end
 end
 
 -- ── Kill recording ────────────────────────────────────────────────────────────
+-- Credit (lastKilledID / lastKillTime for XP attribution) is updated by the
+-- callers (PARTY_KILL game event + CLEU PARTY_KILL subevent) BEFORE the dedup
+-- check, so neither side of the race can suppress credit. RecordKill itself
+-- only handles counting and notifications.
 function NCE:RecordKill(id, name)
     local t  = self.db.global.tracker
     local ch = self.db.char.tracker
@@ -322,10 +358,7 @@ function NCE:RecordKill(id, name)
 
     if name and name ~= '' then t.mobNames[id] = name end
 
-    self.session.kills  = self.session.kills + 1
-    self.lastKilledID   = id
-    self.lastKilledName = name
-    self.lastKillTime   = GetTime()
+    self.session.kills = self.session.kills + 1
 
     local total   = t.killCount[id]
     local char    = ch.killCount[id]
@@ -384,15 +417,24 @@ function NCE:OnTooltip(tt)
     local total = self:GetGlobalCount(id)
 
     local _okAttack, canAttack = pcall(UnitCanAttack, 'player', unit)
-    if char > 0 or total > 0 or (_okAttack and canAttack) then
+    local _okDead, isDead = pcall(UnitIsDead, unit)
+    if char > 0 or total > 0 or (_okAttack and canAttack) or (_okDead and isDead) then
         tt:AddLine(string.format('Killed %s (%s) times.',
             self:commas(char), self:commas(total)), 1, 1, 1)
         if self.db.global.tracker.showexp then
             local xv = self:GetExp(id)
             if xv > 0 then
-                local needed = math.ceil((UnitXPMax('player') - UnitXP('player')) / xv)
-                tt:AddLine(string.format('XP/kill: %s  (%s to level)',
-                    self:commas(xv), self:commas(needed)), 1, 1, 1)
+                -- "X to level" only makes sense while leveling. At max level
+                -- there's no XP bar, so show just the stored per-kill estimate.
+                local xpMax = UnitXPMax('player') or 0
+                local atMax = (xpMax <= 0) or (IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel())
+                if atMax then
+                    tt:AddLine(string.format('XP/kill: ~%s', self:commas(xv)), 1, 1, 1)
+                else
+                    local needed = math.ceil((xpMax - (UnitXP('player') or 0)) / xv)
+                    tt:AddLine(string.format('XP/kill: ~%s  (%s to level)',
+                        self:commas(xv), self:commas(needed)), 1, 1, 1)
+                end
             end
         end
         tt:Show()

@@ -29,7 +29,11 @@ function NCE:SlashReset()
     wipe(t.exp           or {})
     wipe(t.thresholdHits or {})
     wipe(ch.killCount    or {})
-    self.session = { kills = 0, start = GetTime() }
+    t.pvpKills  = 0
+    ch.pvpKills = 0
+    wipe(t.pvpByName  or {})
+    wipe(ch.pvpByName or {})
+    self.session = { kills = 0, pvpKills = 0, start = GetTime() }
     self:Msg('All kill data has been reset.')
 end
 
@@ -56,10 +60,7 @@ function NCE:SlashHelp()
         '  options                  — open settings panel',
         '  pet                      — toggle auto pet summon',
         '  pet now                  — force-summon the selected pet now',
-        '  follow                   — toggle map follow mode',
-        '  mog                      — open Transmog page in /nocat',
-        '  mog unknown              — toggle "unknown items only" filter',
-        '  mog bag                  — toggle bag overlay icons',
+        '  pet debug                — diagnose why auto pet summon is blocked',
         '  list                     — open mob database',
         '  timer <dur>              — start kill timer  (5m / 3m30s / 90)',
         '  stop                     — stop timer',
@@ -77,7 +78,6 @@ function NCE:SlashHelp()
         '  reset                    — wipe all kill data',
         '  print                    — toggle per-kill chat output',
         '  printnew                 — toggle new-mob announcements',
-        '  countmode                — toggle count party/raid kills',
         '  tooltip                  — toggle kill count in tooltips',
         '  showexp / xp             — toggle XP/kill in tooltips',
         '  threshold [N]            — milestone kill threshold',
@@ -89,8 +89,10 @@ function NCE:SlashHelp()
         '  data                     — print session stats',
         '  unsheathe                — toggle weapon unsheathe',
         '  unsheathe city           — toggle unsheathe in cities',
+        '  unsheathe pose <d|s>     — stance: drawn or sheathed',
         '  unsheathe spec           — toggle for current spec',
         '  unsheathe status         — show unsheathe settings',
+        '  unsheathe debug          — diagnose why the weapon will not draw',
     }
     for _, l in ipairs(lines) do print(l) end
 end
@@ -106,6 +108,12 @@ function NCE:SlashData()
         'Total: %s  |  Char: %s  |  Session: %s kills  KPM: %.2f  KPH: %.1f',
         self:commas(tot), self:commas(ctot),
         self:commas(self.session.kills), kpm, kpm * 60))
+    if (t.pvpKills or 0) > 0 or (self.session.pvpKills or 0) > 0 then
+        self:Msg(string.format('PvP kills: %s total  |  Char: %s  |  Session: %s',
+            self:commas(t.pvpKills or 0),
+            self:commas(ch.pvpKills or 0),
+            self:commas(self.session.pvpKills or 0)))
+    end
 end
 
 -- ── Top N ─────────────────────────────────────────────────────────────────────
@@ -148,40 +156,17 @@ local function dispatch(input)
         NCE:SlashHelp()
 
     elseif cmd == 'pet' then
-        if args[1] and args[1]:lower() == 'now' then
+        local sub = (args[1] or ''):lower()
+        if sub == 'now' then
             NCE:TryAutoSummonNow()
+        elseif sub == 'debug' or sub == 'status' or sub == 'diag' then
+            NCE:PetDiag()
         else
             NCE.db.global.pet.enabled = not NCE.db.global.pet.enabled
             NCE:Msg('Pet companion: ' .. (NCE.db.global.pet.enabled and 'ON' or 'OFF'))
+            -- Turning it on should do something visible right away.
+            if NCE.db.global.pet.enabled then NCE:TryAutoSummonNow() end
         end
-
-    elseif cmd == 'mog' or cmd == 'transmog' then
-        -- Drive the embedded CanIMogIt by writing directly to its options
-        -- table — same path the in-game checkbox handlers use.
-        local opt = _G.CanIMogItOptions
-        if not opt then NCE:Msg('Transmog engine not loaded.'); return end
-        local function flash()
-            if _G.CanIMogIt and _G.CanIMogIt.ResetCache  then _G.CanIMogIt:ResetCache()  end
-            if _G.CanIMogIt and _G.CanIMogIt.SendMessage then _G.CanIMogIt:SendMessage('OptionUpdate') end
-        end
-        local sub = args[1] and args[1]:lower()
-        if sub == 'unknown' then
-            opt.showUnknownOnly = not opt.showUnknownOnly
-            flash()
-            NCE:Msg('Transmog "unknown items only": ' .. (opt.showUnknownOnly and 'ON' or 'OFF'))
-        elseif sub == 'bag' or sub == 'icons' then
-            opt.showItemIconOverlay = not opt.showItemIconOverlay
-            flash()
-            NCE:Msg('Transmog bag overlay icons: ' .. (opt.showItemIconOverlay and 'ON' or 'OFF'))
-        else
-            -- No specific subcommand → open the Transmog page in the panel.
-            NCE:OpenOptions()
-        end
-
-    elseif cmd == 'follow' then
-        NCE.db.global.zoom.follow = not NCE.db.global.zoom.follow
-        NCE:ApplyFollowState()
-        NCE:Msg('Map follow: ' .. (NCE.db.global.zoom.follow and 'ON' or 'OFF'))
 
     elseif cmd == 'list' then
         NCE:OpenList()
@@ -289,10 +274,6 @@ local function dispatch(input)
         NCE.db.global.tracker.printnew = not NCE.db.global.tracker.printnew
         NCE:Msg('Print new mobs: ' .. (NCE.db.global.tracker.printnew and 'ON' or 'OFF'))
 
-    elseif cmd == 'countmode' or cmd == 'cm' then
-        NCE.db.global.tracker.countmode = not NCE.db.global.tracker.countmode
-        NCE:Msg('Count party/raid kills: ' .. (NCE.db.global.tracker.countmode and 'ON' or 'OFF'))
-
     elseif cmd == 'tooltip' or cmd == 'tt' then
         NCE.db.global.tracker.tooltip = not NCE.db.global.tracker.tooltip
         NCE:Msg('Tooltip: ' .. (NCE.db.global.tracker.tooltip and 'ON' or 'OFF'))
@@ -338,6 +319,16 @@ local function dispatch(input)
     elseif cmd == 'debug' then
         local d = NCE._diag or {}
         NCE:Msg('── nocat debug ──')
+        -- Surface any init-time errors first: if a module threw during
+        -- OnInitialize, every later module was skipped (no minimap button,
+        -- /nocat silently no-ops, etc.). Names match the _runInit() labels.
+        local ie = NCE._initErrors or {}
+        local hadInitErr = false
+        for mod, err in pairs(ie) do
+            hadInitErr = true
+            NCE:Msg('|cffff5555INIT FAILED|r [' .. mod .. ']: ' .. tostring(err))
+        end
+        if not hadInitErr then NCE:Msg('init: |cff55ff55all modules loaded|r') end
         NCE:Msg('playerGUID: ' .. tostring(NCE.playerGUID))
         NCE:Msg('UnitGUID("player"): ' .. tostring(UnitGUID('player')))
         NCE:Msg('trackingEnabled: ' .. tostring(NCE.trackingEnabled))
@@ -351,11 +342,11 @@ local function dispatch(input)
             .. '   PARTY_KILL on frame: ' .. tostring(pkOnFrame))
         NCE:Msg('CLEU events seen: ' .. tostring(d.events or 0)
             .. '   PARTY_KILL events seen: ' .. tostring(d.partyKillEvents or 0))
-        NCE:Msg('hits cached: ' .. tostring(d.hits or 0) .. '   deaths: ' .. tostring(d.deaths or 0) .. '   kills recorded: ' .. tostring(d.kills or 0))
+        NCE:Msg('deaths in CLEU: ' .. tostring(d.deaths or 0) .. '   kills recorded: ' .. tostring(d.kills or 0))
         NCE:Msg('last event: ' .. tostring(d.lastEvent) .. '   last dst: ' .. tostring(d.lastDst))
-        local cacheN = 0
-        for _ in pairs(NCE.mobHitCache or {}) do cacheN = cacheN + 1 end
-        NCE:Msg('mobHitCache entries: ' .. cacheN)
+        local recentN = 0
+        for _ in pairs(NCE.recentKills or {}) do recentN = recentN + 1 end
+        NCE:Msg('recentKills dedup entries: ' .. recentN)
         NCE:Msg('DB total kills: ' .. tostring((NCE.db.global.tracker.killCount or {})[0] or 0))
         if d.lastError then NCE:Msg('|cffff5555LAST ERROR:|r ' .. tostring(d.lastError)) end
         if UnitExists('target') and not UnitIsPlayer('target') then
@@ -374,10 +365,14 @@ local function dispatch(input)
             NCE:Msg('Unsheathe in cities: ' .. (NCE.db.global.unsheathe.inCities and 'ON' or 'OFF'))
         elseif sub == 'spec' then
             NCE:UnsheatheToggleSpec()
+        elseif sub == 'pose' or sub == 'stance' then
+            NCE:SetStance(args[2])
         elseif sub == 'status' or sub == 'info' then
             NCE:UnsheatheStatus()
+        elseif sub == 'debug' or sub == 'diag' then
+            NCE:UnsheatheDiag()
         else
-            NCE:Msg('Usage: /nocat unsheathe [city|spec|status]')
+            NCE:Msg('Usage: /nocat unsheathe [city|spec|pose <drawn|sheathed>|status|debug]')
         end
 
     else

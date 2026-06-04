@@ -1,5 +1,53 @@
 # nocat.extension Changelog
 
+## 1.2.0 — 2026-06-02
+
+### Bestiary — the mob database is now a trophy room
+- The Mob List is rebuilt as a **Bestiary**. The sortable/searchable kill table
+  lives on the left; the right half is a **trophy pedestal** that shows the
+  selected creature's actual in-game 3D model.
+- **Hover any mob** in the list to inspect it: the model loads on a dark
+  pedestal and slowly auto-spins. **Drag** the model to rotate it by hand,
+  **mouse-wheel** to zoom, and the **o** button toggles auto-spin.
+- Each mob gets a flavour **Bestiary rank** that climbs as you farm it
+  (Acquainted → Hunter → Slayer → Nemesis → Executioner → Annihilator →
+  Worldbane), plus this-character / all-character kill counts, XP per kill,
+  and a **progress bar toward your next kill milestone**.
+- Clicking a row pins it in the pedestal; the panel keeps its numbers live as
+  kills roll in (the model itself only reloads when you pick a different mob).
+- All model calls are guarded, so a creature without a cached model just shows
+  the stats instead of erroring.
+
+## 1.1.0 — 2026-06-02
+
+### Pet Companion — reliability overhaul
+- Random favourites now use the built-in, filter-immune
+  `C_PetJournal.SummonRandomPet(true)`. Fixes the case where an active Pet
+  Journal filter silently hid your favourites so auto-summon did nothing while
+  the manual button still worked.
+- A saved "specific pet" selection is now validated; if that pet was caged or
+  released the stale entry is cleared and a random favourite is summoned instead
+  of silently failing.
+- Login/zone now fire a short self-cancelling retry burst (up to ~10s) to catch
+  the moment the Pet Journal finishes loading — fixes "only summons sometimes
+  after logging in".
+- Added re-summon triggers: resurrect / release (PLAYER_UNGHOST, PLAYER_ALIVE).
+- Turning the feature on now summons immediately.
+- New: `/nocat pet debug` reports exactly what is blocking a summon.
+
+### Weapon Unsheathe — reliability overhaul
+- Reliable re-draw on dismount via PLAYER_MOUNT_DISPLAY_CHANGED (replaces the
+  fragile aura-based mount detection).
+- Added re-draw triggers for resurrect/release and more closed frames.
+- New: `/nocat unsheathe debug` names the exact blocking condition and runs a
+  live ToggleSheath test so you can see whether the draw call works in your
+  current context.
+
+### Notes
+- Verified against Midnight 12.0.5: `ToggleSheath` is unprotected and
+  `C_PetJournal.SummonPetByGUID` is only combat-restricted, so both are safe to
+  call from the addon's timers/events outside combat.
+
 ## 1.0.0 — 2026-05-15
 
 ### Initial release

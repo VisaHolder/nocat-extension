@@ -66,7 +66,7 @@ local function makeCheck(parent, label, tip, getter, setter, x, y)
         f.tooltipText        = label
         f.tooltipRequirement = tip
         f:HookScript('OnEnter', function(self)
-            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetOwner(self, 'ANCHOR_CURSOR')
             GameTooltip:SetText(label, 1, 1, 1)
             GameTooltip:AddLine(tip, 0.85, 0.85, 0.85, true)
             GameTooltip:Show()
@@ -90,7 +90,7 @@ local function makeNum(parent, label, tip, getter, setter, x, y, allW)
     eb:SetNumeric(true)
     if tip then
         eb:SetScript('OnEnter', function(self)
-            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetOwner(self, 'ANCHOR_CURSOR')
             GameTooltip:SetText(tip, 0.85, 0.85, 0.85, 1, true)
             GameTooltip:Show()
         end)
@@ -114,7 +114,7 @@ local function makeText(parent, label, tip, getter, setter, x, y, w, allW)
     eb:SetAutoFocus(false)
     if tip then
         eb:SetScript('OnEnter', function(self)
-            GameTooltip:SetOwner(self, 'ANCHOR_RIGHT')
+            GameTooltip:SetOwner(self, 'ANCHOR_CURSOR')
             GameTooltip:SetText(tip, 0.85, 0.85, 0.85, 1, true)
             GameTooltip:Show()
         end)
@@ -141,7 +141,7 @@ local function makeMenuBtn(parent, getLabel, w, x, y, buildMenu, tip)
     b.Refresh = refresh
     if tip then
         b:SetScript('OnEnter', function(self)
-            GameTooltip:SetOwner(self, 'ANCHOR_TOPRIGHT')
+            GameTooltip:SetOwner(self, 'ANCHOR_CURSOR')
             GameTooltip:SetText(tip, nil, nil, nil, nil, true)
             GameTooltip:Show()
         end)
@@ -165,7 +165,7 @@ local function makeBtn(parent, label, tip, w, x, y, fn)
     b:SetText(label)
     if tip then
         b:SetScript('OnEnter', function(self)
-            GameTooltip:SetOwner(self, 'ANCHOR_TOPRIGHT')
+            GameTooltip:SetOwner(self, 'ANCHOR_CURSOR')
             GameTooltip:SetText(tip, nil, nil, nil, nil, true)
             GameTooltip:Show()
         end)
@@ -251,75 +251,75 @@ function NCE:InitOptions()
 
     section(pgT, 'Tracking', -48)
     allChecks[#allChecks+1] = makeCheck(pgT,
-        'Count kills made by party and raid members',
-        'Credits group member kills as your own.',
-        function() return NCE.db.global.tracker.countmode end,
-        function(v) NCE.db.global.tracker.countmode = v end,
-        4, -66)
-    allChecks[#allChecks+1] = makeCheck(pgT,
         'Disable tracking in dungeons',
-        'Pauses kill recording inside 5-man instances.',
+        'Pauses all kill tracking while you are inside a 5-man dungeon. Kills there will not be recorded.',
         function() return NCE.db.global.tracker.disableDungeons end,
         function(v) NCE.db.global.tracker.disableDungeons = v end,
-        4, -90)
+        4, -66)
     allChecks[#allChecks+1] = makeCheck(pgT,
         'Disable tracking in raids',
-        'Pauses kill recording inside raid instances.',
+        'Pauses all kill tracking while you are inside a raid. Kills there will not be recorded.',
         function() return NCE.db.global.tracker.disableRaids end,
         function(v) NCE.db.global.tracker.disableRaids = v end,
+        4, -90)
+    allChecks[#allChecks+1] = makeCheck(pgT,
+        'Track PvP kills',
+        'Records kills of other players separately from mob kills. Use /nocat data to see your PvP kill totals.',
+        function() return NCE.db.global.tracker.pvp end,
+        function(v) NCE.db.global.tracker.pvp = v end,
         4, -114)
 
     section(pgT, 'Display', -148)
     allChecks[#allChecks+1] = makeCheck(pgT,
         'Show kill count in mob tooltip',
-        'Adds a kill count line when hovering over an enemy.',
+        'When you hover over a mob, shows how many times you have killed it on this character and across all characters.',
         function() return NCE.db.global.tracker.tooltip end,
         function(v) NCE.db.global.tracker.tooltip = v end,
         4, -166)
     allChecks[#allChecks+1] = makeCheck(pgT,
         'Show XP per kill in tooltip',
-        'Estimates XP/kill and kills needed to reach your next level.',
+        'Adds XP per kill and how many more kills of that mob you need to hit your next level to the mob tooltip.',
         function() return NCE.db.global.tracker.showexp end,
         function(v) NCE.db.global.tracker.showexp = v end,
         4, -190)
     allChecks[#allChecks+1] = makeCheck(pgT,
         'Print every kill to chat',
-        'Posts a message after each kill.',
+        'Prints a message in chat every time you record a kill, showing the mob name and your total kill count on it.',
         function() return NCE.db.global.tracker.print end,
         function(v) NCE.db.global.tracker.print = v end,
         4, -214)
     allChecks[#allChecks+1] = makeCheck(pgT,
         'Print new mob discoveries to chat',
-        'One-time message the first time you kill a mob you have never killed before.',
+        'Prints a message in chat the very first time you kill a mob you have never killed before.',
         function() return NCE.db.global.tracker.printnew end,
         function(v) NCE.db.global.tracker.printnew = v end,
         4, -238)
 
     section(pgT, 'Thresholds', -272)
     makeNum(pgT,
-        'Milestone alert every N kills  (0 = off):',
-        'Shows a big on-screen popup when your kill count hits a multiple of N.',
+        'Milestone alert every  (0 = off):',
+        'Set a kill count milestone. Every time your total kills on a mob hits that number or a multiple of it, a big alert pops up on screen. Example: set to 1000 to get an alert at 1000, 2000, 3000 kills etc. Set to 0 to turn off.',
         function() return NCE.db.global.tracker.threshold end,
         function(v) NCE.db.global.tracker.threshold = v or 1000 end,
         4, -292, allEditBox)
     makeNum(pgT,
-        'Instant counter alert every N kills  (0 = off):',
-        'Plays a sound and raid warning when the floating counter hits a multiple of N.',
+        'Instant counter alert every  (0 = off):',
+        'The floating kill counter will flash and play a sound every time your session kill count hits a multiple of this number. Example: set to 50 to get an alert at 50, 100, 150 kills. Set to 0 to turn off.',
         function() return NCE.db.global.tracker.immThreshold end,
         function(v) NCE.db.global.tracker.immThreshold = v or 0 end,
         4, -318, allEditBox)
     makeText(pgT,
-        'Instant counter name filter  (blank = all mobs):',
-        'Only mobs whose names contain this text are counted by the instant counter.',
+        'Instant counter filter  (blank = all mobs):',
+        'Type a mob name here and the floating kill counter will only count kills of mobs that match. Leave blank to count every single kill regardless of mob type.',
         function() return NCE.db.global.tracker.immFilter end,
         function(v) NCE.db.global.tracker.immFilter = v end,
         4, -346, 220, allEditBox)
 
     section(pgT, 'Quick Actions', -396)
-    makeBtn(pgT, 'Mob List',     'Open the full kill database.',                    100, 4,   -416, function() NCE:OpenList() end)
-    makeBtn(pgT, 'Kill Counter', 'Show/hide the floating instant kill counter.',    110, 110, -416, function() NCE:OpenImmediate() end)
-    makeBtn(pgT, 'Announce',     'Post session kill stats to chat.',                90,  226, -416, function() NCE:SlashAnnounce('') end)
-    makeBtn(pgT, 'Target Kills', 'Show kill count for your current target.',        100, 4,   -442,
+    makeBtn(pgT, 'Mob List',     'Opens your full kill database — every mob you have ever killed with total and per-character counts.',  100, 4,   -416, function() NCE:OpenList() end)
+    makeBtn(pgT, 'Kill Counter', 'Opens or closes the small floating window that shows how many kills you have gotten this session.',    110, 110, -416, function() NCE:OpenImmediate() end)
+    makeBtn(pgT, 'Announce',     'Broadcasts your session kill count and kills per minute to your party, raid, or say chat.',  90,  226, -416, function() NCE:SlashAnnounce('') end)
+    makeBtn(pgT, 'Target Kills', 'Looks up your current target in the kill database and prints how many times you have killed it.',  100, 4,   -442,
         function()
             if not UnitExists('target') or UnitIsPlayer('target') then
                 NCE:Msg('No valid target.')
@@ -329,8 +329,8 @@ function NCE:InitOptions()
                 else NCE:Msg('Target is not a creature.') end
             end
         end)
-    makeBtn(pgT, 'Purge Junk', 'Remove all mobs with fewer than 2 global kills.',  100, 110, -442, function() NCE:SlashPurge(2) end)
-    makeBtn(pgT, 'Reset All',  'Permanently wipe all kill records.',                90,  226, -442,
+    makeBtn(pgT, 'Purge Junk', 'Removes any mob from the database that you have only killed once globally. Good for clearing out accidental or one-off kills.',  100, 110, -442, function() NCE:SlashPurge(2) end)
+    makeBtn(pgT, 'Reset All',  'Wipes every kill record for every mob across all characters. This cannot be undone.',  90,  226, -442,
         function()
             StaticPopupDialogs['NCE_RESET'] = {
                 text='Reset ALL nocat kill data? This cannot be undone.',
@@ -426,131 +426,52 @@ function NCE:InitOptions()
         110, 396, -118,
         function() NCE:TryAutoSummonNow() end)
 
-    -- ── PAGE: Map Zoom ────────────────────────────────────────────────────────
-    local pgM = makePage()
-    pageHeader(pgM, 'Map Zoom')
-    section(pgM, 'Behavior', -48)
-    allChecks[#allChecks+1] = makeCheck(pgM,
-        'Follow player on the map',
-        'Keeps the world map centred on your character as you move.',
-        function() return NCE.db.global.zoom.follow end,
-        function(v) NCE.db.global.zoom.follow = v; NCE:ApplyFollowState() end,
-        4, -66)
-
     -- ── PAGE: Weapon Unsheathe ────────────────────────────────────────────────
     local pgW = makePage()
     pageHeader(pgW, 'Weapon Unsheathe')
     section(pgW, 'Behavior', -48)
-    allChecks[#allChecks+1] = makeCheck(pgW,
-        'Keep weapon unsheathed',
-        'Automatically re-unsheathes your weapon whenever it gets put away.',
-        function() return NCE.db.global.unsheathe.enabled end,
-        function(v) NCE.db.global.unsheathe.enabled = v end,
+    -- Two stance checkboxes act as a radio pair: each one both ENABLES the
+    -- feature and picks the stance, and checking one clears the other. Both
+    -- unchecked = feature off. (Avoids the "I checked sheathed but nothing
+    -- happened because the master toggle was off" trap.)
+    local drawnCheck, sheathedCheck
+    local u = function() return NCE.db.global.unsheathe end
+    local function syncStanceChecks()
+        if drawnCheck    then drawnCheck:SetChecked(u().enabled and u().stance ~= 'sheathed') end
+        if sheathedCheck then sheathedCheck:SetChecked(u().enabled and u().stance == 'sheathed') end
+    end
+    drawnCheck = makeCheck(pgW,
+        'Keep weapon DRAWN (unsheathed)',
+        'Keeps your weapon out at all times.\nChecking this clears "keep sheathed".',
+        function() return u().enabled and u().stance ~= 'sheathed' end,
+        function(v)
+            if v then u().enabled = true; u().stance = 'drawn' else u().enabled = false end
+            syncStanceChecks()
+        end,
         4, -66)
-    allChecks[#allChecks+1] = makeCheck(pgW,
-        'Stay unsheathed in cities',
-        'Also keeps weapon drawn while resting in cities and inns.',
-        function() return NCE.db.global.unsheathe.inCities end,
-        function(v) NCE.db.global.unsheathe.inCities = v end,
+    allChecks[#allChecks+1] = drawnCheck
+    sheathedCheck = makeCheck(pgW,
+        'Keep weapon SHEATHED (put away)',
+        'Keeps your weapon put away at all times.\nChecking this clears "keep drawn".\n\nNote: melee vs ranged pose cannot be chosen — WoW has no API for it; the game decides which weapon shows when drawn.',
+        function() return u().enabled and u().stance == 'sheathed' end,
+        function(v)
+            if v then u().enabled = true; u().stance = 'sheathed' else u().enabled = false end
+            syncStanceChecks()
+        end,
         4, -90)
+    allChecks[#allChecks+1] = sheathedCheck
+    allChecks[#allChecks+1] = makeCheck(pgW,
+        'Also stay drawn while resting in cities / inns',
+        'Only applies to the DRAWN stance. Without this, the weapon sheathes while you are resting.',
+        function() return u().inCities end,
+        function(v) u().inCities = v end,
+        4, -114)
 
-    section(pgW, 'Specialization', -120)
+    section(pgW, 'Specialization', -144)
     makeBtn(pgW, 'Toggle Current Spec',
-        'Enable or disable unsheathe for your active specialization.',
-        160, 4, -140,
+        'Enable or disable the weapon stance for your active specialization.',
+        160, 4, -164,
         function() NCE:UnsheatheToggleSpec() end)
-
-    -- ── PAGE: Transmog (controls the embedded CanIMogIt) ─────────────────────
-    local pgX = makePage()
-    pageHeader(pgX, 'Transmog')
-
-    -- Settings here read/write directly into the embedded CanIMogIt's own
-    -- SavedVariable table (CanIMogItOptions). The embedded copy of the addon
-    -- is the actual engine; this page is the UI for it inside /nocat.
-    local function cimGet(var)
-        if not _G.CanIMogItOptions then return false end
-        return _G.CanIMogItOptions[var]
-    end
-    local function cimSet(var, value)
-        if not _G.CanIMogItOptions then return end
-        _G.CanIMogItOptions[var] = value
-        if _G.CanIMogIt and _G.CanIMogIt.ResetCache  then _G.CanIMogIt:ResetCache()  end
-        if _G.CanIMogIt and _G.CanIMogIt.SendMessage then _G.CanIMogIt:SendMessage('OptionUpdate') end
-    end
-
-    local cimBanner = pgX:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
-    cimBanner:SetPoint('TOPLEFT', 4, -34)
-    cimBanner:SetPoint('TOPRIGHT', 0, -34)
-    cimBanner:SetJustifyH('LEFT')
-
-    local function refreshBanner()
-        if _G.CanIMogIt and _G.CanIMogItOptions then
-            cimBanner:SetText('|cff55ff55Transmog engine active.|r Tooltip overlays will show on items.')
-        else
-            cimBanner:SetText('|cffff5555Transmog engine failed to load.|r Make sure the standalone CanIMogIt addon is disabled or removed, then /reload.')
-        end
-    end
-    refreshBanner()
-    pgX:SetScript('OnShow', refreshBanner)
-
-    section(pgX, 'Filters', -58)
-    local function cimCheck(label, tip, var, x, y)
-        local f = makeCheck(pgX, label, tip,
-            function() return cimGet(var) end,
-            function(v) cimSet(var, v) end,
-            x, y)
-        allChecks[#allChecks+1] = f
-        return f
-    end
-
-    cimCheck('Equippable items only',
-        'Only show the icon/tooltip on items that can be equipped.',
-        'showEquippableOnly', 4, -78)
-    cimCheck('Transmoggable items only',
-        'Only show on items that can be transmogged.',
-        'showTransmoggableOnly', 4, -102)
-    cimCheck('Unknown items only',
-        "Only show on items you haven't learned the appearance for.",
-        'showUnknownOnly', 4, -126)
-    cimCheck('Show transmog set info',
-        'Show set summary lines in the tooltip and appearance UI.',
-        'showSetInfo', 4, -150)
-
-    section(pgX, 'Display', -184)
-    cimCheck('Show bag overlay icons',
-        'Render the small status icon directly on items in your bags.',
-        'showItemIconOverlay', 4, -204)
-    cimCheck('Verbose tooltip text',
-        'Show longer, more detailed tooltip lines.',
-        'showVerboseText', 4, -228)
-    cimCheck('Show source location',
-        "Show where an appearance drops from (quest, vendor, world drop, etc.).",
-        'showSourceLocationTooltip', 4, -252)
-
-    section(pgX, 'Item Types', -286)
-    cimCheck('Toys',      'Show on toy items.',          'showToyItems',         4,   -306)
-    cimCheck('Pets',      'Show on pet items.',          'showPetItems',         220, -306)
-    cimCheck('Mounts',    'Show on mount items.',        'showMountItems',       4,   -330)
-    cimCheck('Catalyst',  'Show on catalyzable items.',  'showCatalizableItems', 220, -330)
-    cimCheck('Ensembles', 'Show on ensemble items.',     'showEnsembleItems',    4,   -354)
-    cimCheck('Decor',     'Show on decor items.',        'showDecorItems',       220, -354)
-
-    section(pgX, 'Bag Addon Integrations', -388)
-    local bagStatus = pgX:CreateFontString(nil, 'OVERLAY', 'GameFontHighlight')
-    bagStatus:SetPoint('TOPLEFT', 4, -408)
-    bagStatus:SetJustifyH('LEFT')
-
-    local function refreshBagStatus()
-        if not _G.Baganator then
-            bagStatus:SetText('Baganator: |cffaaaaaanot installed|r')
-        elseif NCE:IsBaganatorBridgeActive() then
-            bagStatus:SetText('Baganator: |cff55ff55connected|r — overlay icons enabled in your bags.')
-        else
-            bagStatus:SetText('Baganator: |cffff5555detected but bridge not active|r — /reload to retry.')
-        end
-    end
-    refreshBagStatus()
-    pgX:HookScript('OnShow', refreshBagStatus)
 
     -- ── PAGE: General ─────────────────────────────────────────────────────────
     local pgG = makePage()
@@ -567,9 +488,7 @@ function NCE:InitOptions()
     local CATS = {
         { label = 'Kill Tracker',     page = pgT },
         { label = 'Pet Companion',    page = pgP },
-        { label = 'Map Zoom',         page = pgM },
         { label = 'Weapon',           page = pgW },
-        { label = 'Transmog',         page = pgX },
         { label = 'General',          page = pgG },
     }
 
@@ -646,7 +565,7 @@ function NCE:InitOptions()
 
     local ver = panel:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
     ver:SetPoint('BOTTOMLEFT', 14, 12)
-    ver:SetText('v1.0.0')
+    ver:SetText('v1.2.0')
 
     -- Sync state on open
     panel:SetScript('OnShow', function()

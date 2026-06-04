@@ -1,8 +1,8 @@
-## Interface: 120005
+## Interface: 120005, 120007
 ## Title: nocat.extension
 ## Author: paul
-## SavedVariables: NocatExtensionDB CanIMogItOptions
-## Version: 1.0.0
+## SavedVariables: NocatExtensionDB
+## Version: 1.2.0
 
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
@@ -15,39 +15,11 @@ libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 Core.lua
 Weapon.lua
 PetCompanion.lua
-MapZoom.lua
 MobList.lua
 Timer.lua
 ImmediateFrame.lua
 ExpTracker.lua
 
-# ── Embedded CanIMogIt (mirrors CanIMogIt/CanIMogIt.toc load order) ─────────
-CanIMogIt\embeds.xml
-CanIMogIt\core.lua
-CanIMogIt\Locale\_locales.xml
-CanIMogIt\constants.lua
-CanIMogIt\classes\appearanceData.lua
-CanIMogIt\classes\bindData.lua
-CanIMogIt\classes\itemData.lua
-CanIMogIt\options.lua
-CanIMogIt\events.lua
-CanIMogIt\cache.lua
-CanIMogIt\requirements.lua
-CanIMogIt\code.lua
-CanIMogIt\tooltips.lua
-CanIMogIt\database.lua
-CanIMogIt\tooltipScanner.lua
-CanIMogIt\mounts.lua
-CanIMogIt\toys.lua
-CanIMogIt\pets.lua
-CanIMogIt\ensembles.lua
-CanIMogIt\catalyze.lua
-CanIMogIt\decor.lua
-CanIMogIt\Overlay\_overlays.xml
-CanIMogIt\Plugins\_plugins.xml
-CanIMogIt\tests.lua
-
-Baganator.lua
 Options.lua
 MinimapButton.lua
 Command.lua

@@ -1,15 +1,14 @@
--- Weapon.lua  (keep weapon unsheathed — improved StayUnsheathed)
+-- Weapon.lua  (keep weapon unsheathed)
 local _, NCE = ...
 
-local SHEATHED = 1
+local SHEATHED = 1  -- GetSheathState(): 1 = stowed, 2 = melee drawn, 3 = ranged drawn
 
--- Sound IDs we used to mute for "mute sheathe sounds". The list was wrong —
--- it included file IDs that play during normal attacks, which killed all
--- combat audio when the option was on. Unmute them at every load to undo
--- any persistent mute from a previous session before this fix.
+-- Sound IDs an old "mute sheathe sounds" option used to mute. The list was
+-- wrong — it included file IDs that play during normal attacks — so unmute
+-- them once at load to undo any persistent mute from before that fix.
 local OLD_SHEATHE_SOUND_IDS = { 567473, 567498, 567456, 567430 }
 
--- Buffs/toys that behave like vehicles but don't set the vehicle flag
+-- Buffs/toys that behave like vehicles but don't set the vehicle flag.
 local PSEUDO_VEHICLES = {
     [196768] = true, [109076] = true, [294384] = true, [294383] = true,
     [278499] = true, [186530] = true, [148773] = true, [125883] = true,
@@ -33,8 +32,8 @@ local function inPseudoVehicle()
     return false
 end
 
--- See PetCompanion.lua — same restricted-UI list: ToggleSheath can also be
--- blocked while these frames are shown, depending on engine version.
+-- ToggleSheath can be blocked while a secure Blizzard frame is shown, fired as
+-- ADDON_ACTION_BLOCKED. Same list the pet module uses.
 local RESTRICTED_FRAMES = {
     'TaxiFrame', 'FlightMapFrame', 'GossipFrame', 'QuestFrame',
     'MerchantFrame', 'MailFrame', 'AuctionHouseFrame', 'TradeFrame',
@@ -50,34 +49,93 @@ local function inRestrictedUI()
     return false
 end
 
-local function canUnsheathe()
+-- Single source of truth for "may we draw the weapon now?". Returns nil when we
+-- may, or a short reason string when we may not (printed by /nocat unsheathe
+-- debug). Keeping it as one ordered list means the debug output names the exact
+-- thing standing in the way — no more guessing why it "isn't working".
+local function unsheatheBlocker()
     local u = NCE.db.global.unsheathe
-    if not u.enabled                                    then return false end
-    if InCombatLockdown()                               then return false end
-    if UnitInVehicle('player')                          then return false end
-    if IsSwimming() and GetUnitSpeed('player') > 0     then return false end
-    if IsResting() and not u.inCities                  then return false end
-    if inPseudoVehicle()                               then return false end
-    if inRestrictedUI()                                 then return false end
-    -- Per-spec check
+    if not u.enabled                                 then return "disabled (turn it on in /nocat options)" end
+    if InCombatLockdown()                            then return 'in combat' end
+    if UnitInVehicle('player')                       then return 'in a vehicle' end
+    if IsMounted()                                   then return 'mounted' end
+    if IsSwimming() and GetUnitSpeed('player') > 0   then return 'swimming' end
+    if IsResting() and not u.inCities                then return "resting — enable 'cities' to override" end
+    if inPseudoVehicle()                             then return 'pseudo-vehicle / toy aura' end
+    if inRestrictedUI()                              then return 'an NPC / Blizzard frame is open' end
     local ch   = NCE.db.char.unsheathe
-    local spec = GetSpecialization()
+    local spec = GetSpecialization and GetSpecialization()
     if spec and ch.specs and ch.specs[spec] and not ch.specs[spec].enabled then
-        return false
+        return 'disabled for this spec'
     end
-    return true
+    return nil
 end
 
+local function canUnsheathe()
+    return unsheatheBlocker() == nil
+end
+
+-- Debounce: stacked-up events (LOOT_CLOSED + MERCHANT_CLOSED + the ticker, etc.)
+-- can all hit tryUnsheathe in the same instant, and if something keeps
+-- re-sheathing (a chair, a toy) uncapped retries cause a visible draw/stow
+-- flicker. Cap ToggleSheath to once every TOGGLE_COOLDOWN seconds.
+local TOGGLE_COOLDOWN = 1.5
+local lastToggle = 0
+
+-- Force-sheathed backoff: when a torch toy / held quest item / channeled cast
+-- keeps the weapon stowed, the 1.5s cooldown isn't enough — every ticker we
+-- redraw, the game restows, and the player sees a flicker. After a ToggleSheath
+-- that doesn't actually draw the weapon, we suppress further toggles for an
+-- exponentially growing window. Resets on success or on any event firing.
+local BACKOFF_STEPS = { 5, 15, 60, 300 }
+local backoffStep   = 0
+local backoffUntil  = 0
+local function resetBackoff() backoffStep = 0; backoffUntil = 0 end
+
+-- Enforces the configured stance. Named tryUnsheathe for back-compat with all
+-- the event/ticker call sites; it now keeps the weapon DRAWN or SHEATHED per
+-- db.global.unsheathe.stance. (Note: drawn = melee OR ranged — which one the
+-- game shows isn't addon-controllable; there is no SetSheathState API.)
 local function tryUnsheathe()
-    if GetSheathState() == SHEATHED and canUnsheathe() then
-        -- pcall: ToggleSheath can trigger a taint dialog in some TWW execution contexts
+    local u = NCE.db.global.unsheathe
+    local now = GetTime()
+    if now - lastToggle < TOGGLE_COOLDOWN then return end
+
+    if u.stance == 'sheathed' then
+        -- Keep weapon put away. Only act when it's currently drawn (2/3).
+        if GetSheathState() == SHEATHED then return end          -- already sheathed
+        if not u.enabled then return end
+        if InCombatLockdown() then return end                     -- never fight the engine in combat
+        -- Respect the per-spec toggle; ignore the draw-only guards (resting /
+        -- mounted / etc.) since sheathing is always safe and always wanted here.
+        local ch = NCE.db.char.unsheathe
+        local spec = GetSpecialization and GetSpecialization()
+        if spec and ch.specs and ch.specs[spec] and not ch.specs[spec].enabled then return end
+        lastToggle = now
         pcall(ToggleSheath)
+        return
     end
+
+    -- Default 'drawn': keep weapon out. Only act when it's currently sheathed.
+    if GetSheathState() ~= SHEATHED then resetBackoff(); return end -- already drawn (or no weapon)
+    if now < backoffUntil then return end                          -- something is forcing sheathed; chill
+    if not canUnsheathe() then return end
+    lastToggle = now
+    -- pcall: ToggleSheath isn't a protected function, but if a secure frame is
+    -- racing it open the engine can still object — swallow that quietly.
+    pcall(ToggleSheath)
+    -- Verify the toggle actually drew the weapon. If it didn't, a torch/held
+    -- item/cast is forcing sheathed — back off so we stop fighting it.
+    C_Timer.After(0.4, function()
+        if GetSheathState() == SHEATHED then
+            backoffStep  = math.min(backoffStep + 1, #BACKOFF_STEPS)
+            backoffUntil = GetTime() + BACKOFF_STEPS[backoffStep]
+        else
+            resetBackoff()
+        end
+    end)
 end
 
--- Undo any sound mutes left over from the removed "Mute sheathe sounds"
--- feature. The IDs we'd been muting included combat audio, so leaving them
--- muted would silence attack sounds.
 local function unmuteOldSheatheSounds()
     if not UnmuteSoundFile then return end
     for _, id in ipairs(OLD_SHEATHE_SOUND_IDS) do
@@ -87,6 +145,7 @@ end
 
 local function initSpecs(ch)
     ch.specs = {}
+    if not GetNumSpecializations then return end
     local n = GetNumSpecializations(false, false)
     for i = 1, n do
         local _, name, _, icon = GetSpecializationInfo(i)
@@ -94,65 +153,81 @@ local function initSpecs(ch)
     end
 end
 
--- Events where the game definitely sheathes your weapon
+-- Events that either stow the weapon (so we re-draw afterwards) or close a frame
+-- that was blocking us. Frame-close events fire BEFORE the frame actually hides,
+-- so the handler defers briefly before re-checking.
 local EVENTS = {
     'PLAYER_ENTERING_WORLD',
-    'PLAYER_REGEN_ENABLED',
+    'PLAYER_REGEN_ENABLED',         -- combat ended
+    'PLAYER_MOUNT_DISPLAY_CHANGED', -- mounted/dismounted — reliable re-draw on dismount
+    'PLAYER_UNGHOST',               -- ran back / soulstone
+    'PLAYER_ALIVE',                 -- resurrected
     'LOOT_CLOSED',
     'AUCTION_HOUSE_CLOSED',
     'UNIT_EXITED_VEHICLE',
     'BARBER_SHOP_CLOSE',
     'MERCHANT_CLOSED',
     'QUEST_FINISHED',
+    -- NPC/UI interactions stow the weapon when the frame OPENS; RESTRICTED_FRAMES
+    -- blocks us while they're shown, so we re-check on the matching CLOSE.
+    'GOSSIP_CLOSED',
+    'MAIL_CLOSED',
+    'BANKFRAME_CLOSED',
+    'GUILDBANKFRAME_CLOSED',
+    'TRADE_CLOSED',
+    'PLAYER_CHOICE_CLOSE',
 }
 
 function NCE:InitWeapon()
     local ch = self.db.char.unsheathe
+    -- Spec init works on /reload, but on a fresh login GetNumSpecializations()
+    -- returns 0 at OnInitialize time (character data not ready yet), so we also
+    -- retry on PLAYER_ENTERING_WORLD below.
     if not ch.specs or #ch.specs == 0 then
         initSpecs(ch)
     end
 
-    -- Clear any leftover mutes from the now-removed "mute sheathe sounds" option.
     unmuteOldSheatheSounds()
 
     local f = CreateFrame('Frame')
-    for _, e in ipairs(EVENTS) do f:RegisterEvent(e) end
-    f:RegisterEvent('UNIT_AURA')
-
-    local wasMounted = IsMounted()
+    -- pcall each registration: an event name that's unknown on this client/patch
+    -- (e.g. a deprecated one like VOID_STORAGE_CLOSE) throws, and an unguarded
+    -- throw here would abort InitWeapon — taking the OnEvent handler + ticker
+    -- down with it, and (since this is the first module to init) cascading into
+    -- the rest of the addon failing to load.
+    for _, e in ipairs(EVENTS) do pcall(f.RegisterEvent, f, e) end
 
     f:SetScript('OnEvent', function(_, event, arg1)
-        -- UNIT_AURA: only care about player, use it to detect dismount
-        if event == 'UNIT_AURA' then
-            if arg1 ~= 'player' then return end
-            local nowMounted = IsMounted()
-            if wasMounted and not nowMounted then
-                -- just dismounted — short delay for state to settle
-                C_Timer.After(0.5, tryUnsheathe)
-            end
-            wasMounted = nowMounted
-            return
+        if event == 'UNIT_EXITED_VEHICLE' and arg1 ~= 'player' then return end
+        if event == 'PLAYER_ENTERING_WORLD' then
+            local ch = NCE.db.char.unsheathe
+            if not ch.specs or #ch.specs == 0 then initSpecs(ch) end
         end
-        -- Defer: events like MERCHANT_CLOSED / QUEST_FINISHED fire BEFORE
-        -- Blizzard's handler hides the frame, so inRestrictedUI() would
-        -- still see :IsShown() == true and block the unsheathe. A short
-        -- delay lets the frame actually hide first.
+        -- Any meaningful state change resets the force-sheathed backoff: ending
+        -- combat, dismounting, closing a frame — all imply whatever was holding
+        -- the weapon down may be gone, so retry immediately.
+        resetBackoff()
+        -- Defer: frame-close events fire BEFORE Blizzard hides the frame, so
+        -- inRestrictedUI() would still see :IsShown() == true. A short delay
+        -- lets the frame actually hide before we re-check.
         C_Timer.After(0.15, tryUnsheathe)
     end)
 
-    -- Fallback ticker: catches edge cases (swimming stops, toy wears off, etc.)
-    -- 1s interval; stops itself when disabled
-    self.unsheatheTimer = C_Timer.NewTicker(1, function()
-        if NCE.db.global.unsheathe.enabled then tryUnsheathe() end
-    end)
+    -- One-shot shortly after login, once character/equipment data has settled.
+    C_Timer.After(1.5, tryUnsheathe)
 
-    C_Timer.After(1, tryUnsheathe)
+    -- Periodic safety net. A lot of re-sheath triggers fire no event at all:
+    -- finishing a cast, sitting in a chair, entering water, a toy wearing off.
+    -- ToggleSheath isn't protected, so this just keeps the weapon out. The call
+    -- is debounced and returns instantly when the weapon is already drawn or
+    -- canUnsheathe() says no, so nearly every tick is a cheap no-op.
+    self.unsheatheTimer = C_Timer.NewTicker(2, tryUnsheathe)
 end
 
 -- ── Helpers called from Command / Options ────────────────────────────────────
 function NCE:UnsheatheToggleSpec()
     local ch   = self.db.char.unsheathe
-    local spec = GetSpecialization()
+    local spec = GetSpecialization and GetSpecialization()
     if not spec or not ch.specs or #ch.specs == 0 then
         self:Msg('Specialization not available.'); return
     end
@@ -160,17 +235,77 @@ function NCE:UnsheatheToggleSpec()
     self:Msg(string.format('Unsheathe for |cffffd700%s|r: %s',
         ch.specs[spec].name,
         ch.specs[spec].enabled and '|cff55ff55ON|r' or '|cffff5555OFF|r'))
+    if ch.specs[spec].enabled then resetBackoff(); C_Timer.After(0.1, tryUnsheathe) end
+end
+
+-- Choose the enforced stance: 'drawn' (weapon out) or 'sheathed' (weapon away).
+-- No argument cycles between the two. Melee-vs-ranged is not selectable (no API).
+function NCE:SetStance(which)
+    local u = self.db.global.unsheathe
+    which = which and tostring(which):lower() or nil
+    if which == 'draw' or which == 'drawn' or which == 'out' or which == 'unsheathed' then
+        u.stance = 'drawn'
+    elseif which == 'sheath' or which == 'sheathed' or which == 'away' or which == 'stow' or which == 'stowed' then
+        u.stance = 'sheathed'
+    elseif which == nil or which == '' then
+        u.stance = (u.stance == 'sheathed') and 'drawn' or 'sheathed'  -- cycle
+    else
+        self:Msg('Usage: /nocat unsheathe pose <drawn|sheathed>'); return
+    end
+    self:Msg('Weapon stance: |cffffd700' .. (u.stance == 'sheathed' and 'always sheathed' or 'always drawn') .. '|r')
+    resetBackoff()
+    if C_Timer and C_Timer.After then C_Timer.After(0.1, tryUnsheathe) end
 end
 
 function NCE:UnsheatheStatus()
     local u  = self.db.global.unsheathe
     local ch = self.db.char.unsheathe
     self:Msg('Unsheathe: ' .. (u.enabled and '|cff55ff55ON|r' or '|cffff5555OFF|r')
+        .. '  Stance: |cffffd700' .. (u.stance == 'sheathed' and 'sheathed' or 'drawn') .. '|r'
         .. '  Cities: ' .. (u.inCities and '|cff55ff55ON|r' or '|cffff5555OFF|r'))
     if ch.specs and #ch.specs > 0 then
         for i, s in ipairs(ch.specs) do
             self:Msg(string.format('  Spec %d |cffffd700%s|r: %s',
                 i, s.name, s.enabled and '|cff55ff55ON|r' or '|cffff5555OFF|r'))
         end
+    end
+end
+
+-- ── Diagnostics (/nocat unsheathe debug) ─────────────────────────────────────
+function NCE:UnsheatheDiag()
+    self:Msg('── weapon unsheathe ──')
+    local u = self.db.global.unsheathe
+    self:Msg('enabled: ' .. (u.enabled and '|cff55ff55yes|r' or '|cffff5555no|r')
+        .. '   stance: |cffffd700' .. (u.stance == 'sheathed' and 'sheathed' or 'drawn') .. '|r'
+        .. '   cities: ' .. (u.inCities and 'yes' or 'no'))
+
+    local st = GetSheathState()
+    local stName = (st == 1 and 'sheathed (stowed)')
+                or (st == 2 and 'melee drawn')
+                or (st == 3 and 'ranged drawn')
+                or ('unknown (' .. tostring(st) .. ')')
+    self:Msg('sheath state: ' .. stName)
+
+    local blk = unsheatheBlocker()
+    self:Msg('can draw now: ' .. (blk and ('|cffff5555no|r — ' .. blk) or '|cff55ff55yes|r'))
+
+    -- Live proof: if we're stowed and nothing is blocking us, actually call
+    -- ToggleSheath and report whether it took effect. This is the definitive
+    -- test of whether the call works in the player's current context.
+    if st == SHEATHED and not blk then
+        self:Msg('running live ToggleSheath test…')
+        lastToggle = 0
+        resetBackoff()
+        pcall(ToggleSheath)
+        C_Timer.After(0.4, function()
+            local s2 = GetSheathState()
+            if s2 ~= SHEATHED then
+                NCE:Msg('|cff55ff55ToggleSheath works|r — weapon is now drawn.')
+            else
+                NCE:Msg('|cffff5555ToggleSheath had no visible effect|r — likely no weapon equipped in a drawable slot.')
+            end
+        end)
+    elseif st ~= SHEATHED then
+        self:Msg('|cff55ff55weapon is already drawn|r — nothing to do.')
     end
 end

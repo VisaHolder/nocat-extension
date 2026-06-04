@@ -1,67 +1,120 @@
-# nocat
+<div align="center">
 
-A personal grab-bag of small fixes and grinding tools for retail WoW. Started as a kill counter, kept growing every time something bugged me.
+# nocat.extension
 
-If you've ever wanted to know exactly how many Ossuary Creepers you've killed across every character, keep your pet out without thinking about it, stop your weapon from sheathing every five seconds, or quickly check if a piece of loot is an appearance you already have — that's what this is for.
+**A personal grab-bag of grinding tools for retail World of Warcraft.**
+
+Lua · Ace3 · The War Within (12.0.x)
+
+<img src="docs/bestiary.png" alt="nocat Bestiary — live 3D mob model + kill stats" width="820"/>
+
+</div>
 
 ---
 
-## What's in the box
+> **Personal addon.** Built piece-by-piece every time something in WoW bugged me.
+> Not on Curse / Wago — runs locally only. Source mirrored here for safekeeping.
 
-### Kill tracker
-The core feature. Counts everything you kill, both per-character and account-wide, and stops being annoying about it.
+---
 
-- Per-mob counts saved to a global database (one number per NPC ID across all your characters) and a per-character database (just this toon).
-- Optional hover tooltip showing how many times you've killed that mob.
-- Optional XP/kill estimate in the tooltip, plus how many more kills until you ding.
+## Features
+
+### Kill tracker — the Bestiary
+
+Counts everything you kill, per-character and account-wide. The list window is a full **Bestiary**: searchable, sortable, with a **live 3D model** of whatever you hover.
+
+- Per-mob counts saved to a global DB (one number per NPC ID across every character) and a per-character mirror.
+- Bestiary window (`/nocat list`): NPC ID / Name / Char / Total columns, click to sort, search by name or id.
+- **Trophy pedestal** on the right: hover any row → that mob's 3D model loads on a pedestal and auto-spins. **Drag** to rotate, **mouse-wheel** to zoom, **`o`** to toggle spin.
+- Flavour **bestiary rank** that climbs as you farm a mob (Acquainted → Hunter → Slayer → Nemesis → Executioner → Annihilator → Worldbane).
+- Live **milestone progress bar** to your next kill threshold.
+- Optional hover tooltip on real mobs in the world: how many you've killed (char + total).
+- Optional XP/kill estimate in the tooltip (rested-bonus aware; hidden at max level since it's not actionable).
 - Configurable milestone alerts ("you just hit 5,000 of these!") with a big on-screen popup.
-- A floating instant counter window — drag it anywhere — that ticks up as you grind. Set it to alert every N kills, optionally filtered to only count mobs matching a name pattern.
-- Tracks kills from group/raid members too if you turn that on.
+- A floating instant counter window — drag it anywhere — that ticks up as you grind. Threshold alerts + optional name filter.
 - Pauses tracking inside dungeons or raids if you want it to.
-- Per-target kill timer: start a 5-minute timer, see your KPM and KPH at the end.
-- Session stats: kills this session, kills/minute, kills/hour.
-- Top-N list of your most-killed mobs.
+- Per-target **kill timer** with KPM / KPH at the end.
+- Session stats (kills, KPM, KPH) and top-N most-killed list.
 - "Purge junk" command to wipe entries below a kill threshold so your database stays clean.
 
 ### Pet companion
+
 Keeps a battle pet out without you having to think about it.
 
 - Auto-summons whenever you become eligible (out of combat, not mounted, not stealthed, no restricted UI open, etc.).
-- Pick a specific pet from a dropdown, or let it roll random from your favorites.
-- "Summon Now" button for when you want to force it without waiting for an event.
-- Knows about the dumb edge cases — stealth, swimming-and-moving, dragonriding, flight master windows — and doesn't try to summon while you're in them. No "you can't do that right now" popups.
+- Pick a specific pet from the dropdown, or roll random from your favorites — uses `C_PetJournal.SummonRandomPet(true)` so a journal filter can't accidentally hide them.
+- Validates the saved pet GUID; if the pet was caged or released it falls back to a random favorite instead of silently failing.
+- Bounded retry burst on login / zone change (the journal often isn't loaded the instant `PLAYER_ENTERING_WORLD` fires).
+- Respects restricted UI states (flight master / merchant / mailbox / etc.) so you never see "blocked from an action" popups.
+- `/nocat pet debug` reports the exact blocker if it's not summoning.
 
-### Weapon unsheathe
-Re-draws your weapon whenever the game puts it away.
+### Weapon stance
 
-- Fires on the usual triggers: combat end, loot close, merchant close, quest complete, dismount, exiting vehicles, leaving the barber.
-- Optional toggle for staying drawn inside cities/inns.
-- Per-spec on/off — if you play Holy on one spec but want the weapon out on Ret, that's fine.
+Re-draws **or** keeps sheathed — your choice.
 
-### Map zoom — follow mode
-- "Follow player" keeps the world map centered on your character as you move/fly. Smooth, no jitter, and skips redraws when you haven't actually moved (so it doesn't tank your framerate when you're flying around).
+- Two stance modes: **drawn** (weapon always out) or **sheathed** (weapon always put away). Pick one in the options panel; the other auto-clears.
+- Reliable triggers: combat end, loot/merchant/quest close, dismount (via `PLAYER_MOUNT_DISPLAY_CHANGED`), vehicle exit, ghost/alive transitions.
+- Optional "stay drawn while resting in cities/inns."
+- Per-spec on/off — play Holy on one spec but want the weapon out on Ret? Fine.
+- `/nocat unsheathe debug` runs a live `ToggleSheath` test so you can see whether the call works in your current context.
 
-### Transmog (embedded "Can I Mog It?")
-The full CanIMogIt addon is bundled inside nocat — you don't need to install it separately. It adds tooltip text and corner overlay icons telling you if you've collected an appearance.
-
-- Red X on items you haven't learned.
-- Green check on items you have.
-- Cyan check for "you know this appearance from a different item."
-- Grey for "your class can't learn this."
-- Works on bags, loot, vendors, mail, AH, encounter journal, quest rewards, etc.
-- Bag overlays show up in default Blizzard bags and in supported bag addons: AdiBags, ArkInventory, Bagnon, BetterBags, ElvUI, LiteBag, cargBags-Nivaya — plus **Baganator**, which we bridge to manually (Baganator's built-in CanIMogIt hook doesn't fire when CIMI is embedded, so nocat re-registers it).
-- All settings controllable from `/nocat → Transmog`. CanIMogIt's own slash commands (`/cimi`, `/canimogit`) are disabled — use nocat's instead.
+> **Limitation:** melee vs ranged pose is *not* selectable — WoW has no `SetSheathState` API. The game itself picks which weapon shows when drawn.
 
 ### Minimap button
-A small cat-face icon next to your minimap. Click it to open the settings panel. Drag to move. Plays nice with square minimaps from Leatrix Plus / ElvUI / etc.
+
+LibDBIcon-1.0 backed. Click to open settings, right-click to open the Bestiary, drag to move. Plays nice with square minimaps from Leatrix Plus / ElvUI / MoveAny.
+
+---
+
+## Tech
+
+| Layer | Stack |
+|---|---|
+| Game | World of Warcraft Retail — The War Within (12.0.5, 12.0.7) |
+| Language | Lua 5.1 (WoW dialect) |
+| Framework | Ace3 — `AceAddon-3.0`, `AceDB-3.0`, `AceEvent-3.0` |
+| Bundled libs | `LibStub`, `CallbackHandler-1.0`, `LibDataBroker-1.1`, `LibDBIcon-1.0` |
+| Saved variables | `NocatExtensionDB` (global tables + per-character mirrors) |
+
+## Project layout
+
+```
+nocat.extension/
+├── nocat.extension.toc      # AddOn manifest — interface versions + load order
+├── Core.lua                 # AceAddon init, DB defaults, kill-tracker core, tooltip
+├── Weapon.lua               # Unsheathe / stance enforcement
+├── PetCompanion.lua         # Auto-summon companion pet
+├── MobList.lua              # Bestiary window — 3D model pedestal + sortable table
+├── Timer.lua                # Per-target kill timer (KPM/KPH)
+├── ImmediateFrame.lua       # Floating session counter
+├── ExpTracker.lua           # XP-per-kill estimator (rested-aware)
+├── Options.lua              # Settings panel
+├── MinimapButton.lua        # LDBI-backed minimap icon
+├── Command.lua              # /nocat slash command dispatcher
+├── CHANGELOG.md
+├── LICENSE                  # MIT
+├── docs/                    # Screenshots used by this README
+└── libs/                    # Bundled Ace3 + LDB + LDBI (no externals)
+```
+
+## Install
+
+Drop the `nocat.extension/` folder (the one containing `nocat.extension.toc`) into:
+
+```
+World of Warcraft/_retail_/Interface/AddOns/
+```
+
+…then `/reload` or restart the client. The minimap cat-face icon means it loaded.
 
 ---
 
 ## Commands
 
-Type `/nocat` to open settings, or `/nocat help` for the full list.
+Type `/nocat` to open settings, or `/nocat help` for the full list. Also available as `/nce`.
 
 ### General
+
 | Command | What it does |
 |---|---|
 | `/nocat` | Opens the settings panel |
@@ -71,22 +124,24 @@ Type `/nocat` to open settings, or `/nocat help` for the full list.
 | `/nocat data` | Prints session stats: kills, KPM, KPH |
 | `/nocat minimap` | Show/hide the minimap button |
 | `/nocat mmreset` | Resets the minimap button to its default position |
+| `/nocat debug` | Diagnostic: event counts, init errors, last kill, etc. |
 
 ### Kill tracker — viewing
+
 | Command | What it does |
 |---|---|
-| `/nocat list` | Opens the full mob database window |
+| `/nocat list` | Opens the Bestiary window |
 | `/nocat target` *or* `/nocat t` | Prints kill count for whatever you're targeting |
 | `/nocat lookup <name or id>` | Prints kill count for a specific mob |
 | `/nocat top [N]` | Prints your top-N most-killed mobs (default 5, max 25) |
 | `/nocat announce [channel]` | Posts session stats to chat (default: SAY) |
 
 ### Kill tracker — toggles
+
 | Command | What it does |
 |---|---|
 | `/nocat print` | Toggle per-kill chat message |
 | `/nocat printnew` | Toggle "you killed a new mob!" announcements |
-| `/nocat countmode` | Toggle counting party/raid member kills as your own |
 | `/nocat tooltip` | Toggle kill count in mob tooltips |
 | `/nocat showexp` *or* `/nocat xp` | Toggle XP/kill in tooltips |
 | `/nocat dungeons` | Toggle disabling tracking inside 5-mans |
@@ -94,6 +149,7 @@ Type `/nocat` to open settings, or `/nocat help` for the full list.
 | `/nocat threshold [N]` | Set milestone kill threshold (0 = off) |
 
 ### Kill tracker — instant counter
+
 | Command | What it does |
 |---|---|
 | `/nocat imm` | Show/hide the floating counter |
@@ -102,12 +158,14 @@ Type `/nocat` to open settings, or `/nocat help` for the full list.
 | `/nocat imm clearfilter` | Removes the filter |
 
 ### Kill tracker — kill timer
+
 | Command | What it does |
 |---|---|
 | `/nocat timer <dur>` | Start a timer. Accepts `5m`, `3m30s`, `90` (seconds) |
 | `/nocat stop` | Stop the running timer |
 
 ### Kill tracker — editing data
+
 | Command | What it does |
 |---|---|
 | `/nocat set <id> <name> <global> <char>` | Manually set kill counts for a mob |
@@ -116,30 +174,23 @@ Type `/nocat` to open settings, or `/nocat help` for the full list.
 | `/nocat reset` | Wipe **all** kill data (asks first) |
 
 ### Pet companion
+
 | Command | What it does |
 |---|---|
 | `/nocat pet` | Toggle auto pet summon |
 | `/nocat pet now` | Force-summon the currently selected pet right now |
+| `/nocat pet debug` | Diagnose why auto pet summon is blocked |
 
-### Map
+### Weapon stance
+
 | Command | What it does |
 |---|---|
-| `/nocat follow` | Toggle "follow player on the map" |
-
-### Weapon unsheathe
-| Command | What it does |
-|---|---|
-| `/nocat unsheathe` | Toggle weapon unsheathe |
-| `/nocat unsheathe city` | Toggle whether to stay unsheathed in cities/inns |
+| `/nocat unsheathe` | Toggle the feature on/off |
+| `/nocat unsheathe pose <drawn\|sheathed>` | Pick the stance (or cycle with no arg) |
+| `/nocat unsheathe city` | Toggle staying drawn in cities/inns |
 | `/nocat unsheathe spec` | Toggle for your current spec |
-| `/nocat unsheathe status` | Print current unsheathe settings |
-
-### Transmog
-| Command | What it does |
-|---|---|
-| `/nocat mog` | Opens the Transmog page in settings |
-| `/nocat mog unknown` | Toggle "only show on items you haven't collected" |
-| `/nocat mog bag` | Toggle bag corner overlay icons |
+| `/nocat unsheathe status` | Print current settings |
+| `/nocat unsheathe debug` | Live ToggleSheath test + named blocker |
 
 ---
 
@@ -148,35 +199,33 @@ Type `/nocat` to open settings, or `/nocat help` for the full list.
 Everything's also reachable from `/nocat`. The panel has tabs on the left:
 
 - **Kill Tracker** — every toggle and threshold for the tracker, plus quick-action buttons (Mob List, Kill Counter, Announce, Target Kills, Purge Junk, Reset All).
-- **Pet Companion** — auto-summon toggle, pet picker dropdown, Summon Now button.
-- **Map Zoom** — follow toggle.
-- **Weapon** — unsheathe toggles + "toggle current spec" button.
-- **Transmog** — every CanIMogIt option grouped into Filters / Display / Item Types, plus a status line for Baganator integration.
+- **Pet Companion** — auto-summon toggle and pet picker dropdown with a Summon Now button.
+- **Weapon** — stance radio (drawn / sheathed), in-cities override, per-spec toggle.
 - **General** — startup behaviour.
 
-Every checkbox, input, and button shows a description tooltip when you hover it. No mystery boxes.
+Every checkbox, input, and button shows a description tooltip on hover. No mystery boxes.
 
 ---
 
 ## Saved variables
 
-- `NocatExtensionDB` — all nocat settings, kill counts, mob names, panel state.
-- `CanIMogItOptions` — the bundled CanIMogIt's settings.
+- `NocatExtensionDB` — all settings, kill counts, mob names, panel state.
 
-Both persist across sessions. The kill database is global (shared across characters) plus a per-character mirror.
+Stored globally (shared across characters) with a per-character mirror for char-only counts. Kill data is keyed by **NPC ID**, not name, so future patch renames don't lose your data.
 
 ---
 
 ## Notes / gotchas
 
-- If you've got the standalone **Can I Mog It?** addon enabled in your addon list, disable it. nocat bundles the full CanIMogIt source inside itself, so running both at once causes a name collision and you'll get red errors at login. nocat prints a chat warning if it detects this.
-- Pet auto-summon respects restricted UI states (flight masters, merchants, mailbox, etc.) so you won't see "blocked from an action" popups.
-- Weapon unsheathe defers by a fraction of a second after merchant/quest close so the frame actually hides before nocat checks — without this, the unsheathe gets blocked.
-- All kill counts use **NPC ID** as the key, not name. Renames in future patches don't lose your data.
-- Map follow throttles its scroll updates so flying around doesn't cause stuttering. You can move and the map keeps up; you stand still and nocat does nothing.
+- Pet auto-summon and weapon enforcement both respect restricted UI states (flight masters, merchants, mailbox, etc.) so you won't see "blocked from an action" popups.
+- Weapon enforcement defers by a fraction of a second after frame-close events so the secure frame actually hides before the addon re-checks.
+- XP-per-kill is an **estimate** — it subtracts the rested bonus but can't separate War Mode / heirloom / buff inflation from a raw `UnitXP` delta.
+- The `.toc` declares multiple Interface versions so Blizzard's minor patches (e.g. 12.0.5 → 12.0.7) don't auto-flag the addon out-of-date.
 
 ---
 
-## Why "nocat"
+## Updating this repo
 
-There's no good reason. It started as a joke, the name stuck.
+```bash
+git add -A && git commit -m "vX.Y.Z release notes" && git push
+```
