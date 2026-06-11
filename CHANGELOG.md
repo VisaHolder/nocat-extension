@@ -1,5 +1,17 @@
 # nocat.extension Changelog
 
+## 1.2.2 — 2026-06-11
+
+### Housekeeping
+- Removed the unused **AceLocale-3.0** library from `libs/` — it was never listed
+  in the `.toc` (so the game never loaded it) and the addon has no localization
+  layer. Pure dead weight in the packaged zip; gone now.
+- Removed a dead `_applyModelLight()` function left over from the Bestiary
+  model-rendering debugging. The shipped render path uses `SetDisplayInfo`, so
+  this `SetLight` helper was never called.
+
+No behaviour changes — this is a leanness/cleanup release.
+
 ## 1.2.1 — 2026-06-11
 
 ### Fixed

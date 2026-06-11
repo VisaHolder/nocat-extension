@@ -2,7 +2,7 @@
 ## Title: nocat.extension
 ## Author: paul
 ## SavedVariables: NocatExtensionDB
-## Version: 1.2.1
+## Version: 1.2.2
 
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
