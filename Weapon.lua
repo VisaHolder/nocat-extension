@@ -50,6 +50,12 @@ local function inRestrictedUI()
 end
 
 -- Single source of truth for "may we draw the weapon now?". Returns nil when we
+-- Post-init window during which the resting-in-cities check is bypassed. After
+-- /reload the player almost always wants their weapon out immediately, even in
+-- a city — the "stay drawn in cities" option then governs what happens once
+-- they next sheathe (e.g. via an NPC interaction). Set in InitWeapon.
+local restingBypassUntil = 0
+
 -- may, or a short reason string when we may not (printed by /nocat unsheathe
 -- debug). Keeping it as one ordered list means the debug output names the exact
 -- thing standing in the way — no more guessing why it "isn't working".
@@ -60,7 +66,10 @@ local function unsheatheBlocker()
     if UnitInVehicle('player')                       then return 'in a vehicle' end
     if IsMounted()                                   then return 'mounted' end
     if IsSwimming() and GetUnitSpeed('player') > 0   then return 'swimming' end
-    if IsResting() and not u.inCities                then return "resting — enable 'cities' to override" end
+    -- Draw anywhere it's technically possible: resting / being in a city no longer
+    -- blocks (a drawn weapon is perfectly valid there). Only the states where the
+    -- weapon genuinely can't show drawn gate it (combat, mounted, swim-moving,
+    -- vehicle, pseudo-vehicle, secure frames). The 'cities' toggle is now a no-op.
     if inPseudoVehicle()                             then return 'pseudo-vehicle / toy aura' end
     if inRestrictedUI()                              then return 'an NPC / Blizzard frame is open' end
     local ch   = NCE.db.char.unsheathe
@@ -176,6 +185,29 @@ local EVENTS = {
     'GUILDBANKFRAME_CLOSED',
     'TRADE_CLOSED',
     'PLAYER_CHOICE_CLOSE',
+    -- ── Newly added safeguards ──────────────────────────────────────────────
+    -- Spell casts / channels (toys, escort items, etc.) lock the weapon down
+    -- while active. None of the close-frame events fire when a cast ends, so
+    -- without these the weapon stayed stowed until the next lucky trigger.
+    'UNIT_SPELLCAST_STOP',
+    'UNIT_SPELLCAST_FAILED',
+    'UNIT_SPELLCAST_INTERRUPTED',
+    'UNIT_SPELLCAST_SUCCEEDED',
+    'UNIT_SPELLCAST_CHANNEL_STOP',
+    -- Player-side aura changes — when a torch/banner/quest-item aura drops,
+    -- the weapon is free again. Filtered to unit=='player' inside the handler.
+    'UNIT_AURA',
+    -- Weapon swap or item change — sheath state can reset, and the backoff
+    -- needs to clear so a swap-then-toggle isn't blocked by stale state.
+    'PLAYER_EQUIPMENT_CHANGED',
+    'UNIT_INVENTORY_CHANGED',
+    -- Shapeshift in/out of a form (druids, monks, shaman ghost wolf, etc.)
+    'UPDATE_SHAPESHIFT_FORM',
+    -- Pet battle ends — the engine puts your weapon away during the battle.
+    'PET_BATTLE_CLOSE',
+    -- Resting flag flipping (entering/leaving inns) often coincides with a
+    -- silent re-sheathe; cheap to recheck.
+    'PLAYER_UPDATE_RESTING',
 }
 
 function NCE:InitWeapon()
@@ -198,30 +230,57 @@ function NCE:InitWeapon()
     for _, e in ipairs(EVENTS) do pcall(f.RegisterEvent, f, e) end
 
     f:SetScript('OnEvent', function(_, event, arg1)
-        if event == 'UNIT_EXITED_VEHICLE' and arg1 ~= 'player' then return end
+        -- Filter unit-scoped events to the player only — without this we spend
+        -- effort on every party/raid member's auras, casts, gear changes, etc.
+        if (event == 'UNIT_EXITED_VEHICLE'
+            or event == 'UNIT_AURA'
+            or event == 'UNIT_SPELLCAST_STOP'
+            or event == 'UNIT_SPELLCAST_FAILED'
+            or event == 'UNIT_SPELLCAST_INTERRUPTED'
+            or event == 'UNIT_SPELLCAST_SUCCEEDED'
+            or event == 'UNIT_SPELLCAST_CHANNEL_STOP'
+            or event == 'UNIT_INVENTORY_CHANGED')
+            and arg1 ~= 'player' then return end
+
         if event == 'PLAYER_ENTERING_WORLD' then
             local ch = NCE.db.char.unsheathe
             if not ch.specs or #ch.specs == 0 then initSpecs(ch) end
         end
         -- Any meaningful state change resets the force-sheathed backoff: ending
-        -- combat, dismounting, closing a frame — all imply whatever was holding
-        -- the weapon down may be gone, so retry immediately.
+        -- combat, dismounting, closing a frame, a toy wearing off — all imply
+        -- whatever was holding the weapon down may be gone, so retry immediately.
         resetBackoff()
         -- Defer: frame-close events fire BEFORE Blizzard hides the frame, so
         -- inRestrictedUI() would still see :IsShown() == true. A short delay
         -- lets the frame actually hide before we re-check.
         C_Timer.After(0.15, tryUnsheathe)
+        -- A second check ~1s later catches the case where a toy / cast / channel
+        -- only finishes resolving (and the sheath state actually flips) slightly
+        -- after the event fires. The cooldown + early-return makes this cheap.
+        C_Timer.After(1.0, tryUnsheathe)
     end)
 
-    -- One-shot shortly after login, once character/equipment data has settled.
+    -- Post-init bypass: for the next 5s, IsResting() doesn't block the draw.
+    -- This is the /reload-in-a-city case — the user just reloaded, the weapon
+    -- is stowed, every event handler + ticker is about to fire — let one of
+    -- them actually draw it instead of being blocked by the resting guard.
+    restingBypassUntil = GetTime() + 5
+
+    -- Stagger a few one-shot draws shortly after login. PLAYER_ENTERING_WORLD
+    -- already fires tryUnsheathe via OnEvent, but character/equipment/spec data
+    -- can take a beat to settle on fresh login, so multiple cheap attempts
+    -- maximize the chance one lands cleanly.
+    C_Timer.After(0.5, tryUnsheathe)
     C_Timer.After(1.5, tryUnsheathe)
+    C_Timer.After(3.0, tryUnsheathe)
 
     -- Periodic safety net. A lot of re-sheath triggers fire no event at all:
     -- finishing a cast, sitting in a chair, entering water, a toy wearing off.
     -- ToggleSheath isn't protected, so this just keeps the weapon out. The call
     -- is debounced and returns instantly when the weapon is already drawn or
     -- canUnsheathe() says no, so nearly every tick is a cheap no-op.
-    self.unsheatheTimer = C_Timer.NewTicker(2, tryUnsheathe)
+    -- 1s tick (was 2s) — tighter recovery from edge cases the events miss.
+    self.unsheatheTimer = C_Timer.NewTicker(1, tryUnsheathe)
 end
 
 -- ── Helpers called from Command / Options ────────────────────────────────────

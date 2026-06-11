@@ -44,14 +44,18 @@ local function summonBlocker()
     if not NCE.db.global.pet.enabled                            then return 'disabled (turn it on in /nocat options)' end
     if not (C_PetJournal and C_PetJournal.GetNumPets)           then return 'pet journal API unavailable' end
     if UnitAffectingCombat('player')                            then return 'in combat' end
-    if IsFlying()                                               then return 'flying' end
     if UnitHasVehicleUI('player')                               then return 'vehicle UI' end
-    if UnitIsControlling('player') and UnitChannelInfo('player')then return 'controlling another unit' end
-    if IsStealthed()                                            then return 'stealthed' end
+    if UnitIsControlling and UnitIsControlling('player') and UnitChannelInfo('player') then return 'controlling another unit' end
     if UnitIsGhost('player')                                    then return 'dead / ghost' end
     if inRestrictedUI()                                         then return 'NPC / Blizzard frame open' end
+    -- Don't blow the player's cover: stealth / invisibility still block the summon
+    -- (a companion would reveal you). Everything else is open now — flying, resting,
+    -- cities, etc. all summon fine; only combat / vehicle / dead / secure-frame /
+    -- stealth / invis / already-out gate it.
+    if IsStealthed()                                            then return 'stealthed' end
+    local getAura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
     for _, id in ipairs(INVIS_AURAS) do
-        if C_UnitAuras.GetPlayerAuraBySpellID(id)               then return 'invisibility aura active' end
+        if getAura and getAura(id)                              then return 'invisibility aura active' end
     end
     if C_PetJournal.GetSummonedPetGUID() ~= nil                 then return 'a pet is already out' end
     return nil
@@ -248,7 +252,7 @@ function NCE:InitPetCompanion()
     -- pet dies to area damage, gets dropped by a taxi, or simply wanders off.
     -- autoSummon() is idempotent and CanSummon() returns instantly once a pet
     -- is out, so the overwhelming majority of ticks do nothing.
-    C_Timer.NewTicker(5, autoSummon)
+    self.petSafetyTicker = C_Timer.NewTicker(5, autoSummon)
 end
 
 -- ── Diagnostics (/nocat pet debug) ───────────────────────────────────────────

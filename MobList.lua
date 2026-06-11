@@ -11,6 +11,14 @@ local ROW_H    = 18
 local FRAME_W  = 824
 local FRAME_H  = 560
 
+-- Model-load debounce generation. MUST be declared here, before ClearPreview()
+-- and InitMobList — ClearPreview increments it and runs during pedestal setup,
+-- so if it were declared later (below those functions) ClearPreview would bind
+-- to a nil GLOBAL and `nil + 1` would throw, failing the pedestal pcall and
+-- nuking the 3D model frame (f.model = nil → permanently black pedestal).
+local _modelLoadGen = 0
+local MODEL_LOAD_DEBOUNCE = 0.1
+
 -- Right edge of the table area (x offset from the frame's left). Everything to
 -- the right of this is the model/preview pedestal.
 local LIST_RIGHT = 540
@@ -22,8 +30,11 @@ local COLS = {
     { key='total', label='Total',  w=78,  j='RIGHT' },
 }
 
-local COL_START_X = 10
-local HDR_Y       = -54
+local COL_START_X       = 10
+local HDR_Y             = -54
+-- Pixels reserved on the right of the list area for the scrollbar. Rows stop
+-- before this so they don't overlap (and visually eat) the scrollbar.
+local SCROLLBAR_RESERVE = 18
 local ROWS_Y      = -72
 
 -- Per-mob bestiary rank by total kills — pure flavour, but it gives each
@@ -66,7 +77,16 @@ function NCE:InitMobList()
     local search = CreateFrame('EditBox', 'NCEListSearch', f, 'SearchBoxTemplate')
     search:SetSize(200, 24)
     search:SetPoint('TOPLEFT', f, 'TOPLEFT', 10, -28)
-    search:SetScript('OnTextChanged', function() NCE:UpdateList() end)
+    -- SearchBoxTemplate's own OnTextChanged hides the "Search" placeholder and
+    -- shows/hides the clear-x button. SetScript replaces that, so we'd be stuck
+    -- with the placeholder painted behind our typed text. Call the template's
+    -- handler explicitly, then run our filter refresh.
+    search:SetScript('OnTextChanged', function(self, userInput)
+        if SearchBoxTemplate_OnTextChanged then
+            SearchBoxTemplate_OnTextChanged(self)
+        end
+        NCE:UpdateList()
+    end)
     f.search = search
 
     local countLbl = f:CreateFontString(nil, 'OVERLAY', 'GameFontNormalSmall')
@@ -108,8 +128,8 @@ function NCE:InitMobList()
     for i = 1, NUM_ROWS do
         local row = CreateFrame('Button', nil, f)
         row:SetHeight(ROW_H)
-        row:SetPoint('TOPLEFT',  f, 'TOPLEFT', COL_START_X - 2, ROWS_Y + -(i - 1) * ROW_H)
-        row:SetPoint('TOPRIGHT', f, 'TOPLEFT', LIST_RIGHT,      ROWS_Y + -(i - 1) * ROW_H)
+        row:SetPoint('TOPLEFT',  f, 'TOPLEFT', COL_START_X - 2,                    ROWS_Y + -(i - 1) * ROW_H)
+        row:SetPoint('TOPRIGHT', f, 'TOPLEFT', LIST_RIGHT - SCROLLBAR_RESERVE,     ROWS_Y + -(i - 1) * ROW_H)
         row:Hide()
 
         local bg = row:CreateTexture(nil, 'BACKGROUND')
@@ -128,17 +148,33 @@ function NCE:InitMobList()
         end
 
         row:SetScript('OnEnter', function(self)
+            f._hovering = true            -- hovering = temporary peek
             self.bg:SetColorTexture(0.25, 0.55, 1, 0.18)
             if self.rowData then NCE:PreviewMob(self.rowData) end
         end)
         row:SetScript('OnLeave', function(self)
-            self.bg:SetColorTexture(1, 1, 1, self.altRow and 0.03 or 0)
+            f._hovering = false
+            -- Keep the clicked/selected row highlighted; others fall back to the
+            -- zebra-stripe background.
+            if self.rowData and f.selectedID == self.rowData.id then
+                self.bg:SetColorTexture(1, 0.82, 0, 0.22)
+            else
+                self.bg:SetColorTexture(1, 1, 1, self.altRow and 0.03 or 0)
+            end
+            -- Snap the preview back to the clicked (gold) selection — unless the
+            -- mouse has just moved onto another row (then the peek continues).
+            C_Timer.After(0.05, function()
+                if not f._hovering and f.selectedData then
+                    NCE:PreviewMob(f.selectedData)
+                end
+            end)
         end)
         row:SetScript('OnClick', function(self)
-            if self.rowData then
-                NCE:PreviewMob(self.rowData)
-                f.pinnedID = self.rowData.id
-            end
+            if not self.rowData then return end
+            f.selectedID   = self.rowData.id
+            f.selectedData = self.rowData     -- remembered so OnLeave can revert to it
+            NCE:PreviewMob(self.rowData)
+            NCE:RefreshRowHighlights()
         end)
 
         row.altRow = (i % 2 == 0)
@@ -155,6 +191,31 @@ function NCE:InitMobList()
         end)
     end)
     f.scrollFrame = sf
+
+    -- Style the FauxScrollFrame bar: hide the ugly default arrow textures, give
+    -- the track a subtle dark background, and recolor the thumb to match the
+    -- gold accent so it actually reads against the dark frame.
+    local _bar = sf.ScrollBar or _G['NCEListScrollScrollBar']
+    if _bar then
+        _bar:SetWidth(12)
+        _bar:ClearAllPoints()
+        _bar:SetPoint('TOPRIGHT',    sf, 'TOPRIGHT',    -2,  -2)
+        _bar:SetPoint('BOTTOMRIGHT', sf, 'BOTTOMRIGHT', -2,   2)
+        local trackBg = _bar:CreateTexture(nil, 'BACKGROUND')
+        trackBg:SetAllPoints()
+        trackBg:SetColorTexture(0, 0, 0, 0.45)
+        -- Replace the dated thumb with a clean accent-colored bar
+        local thumb = _bar:GetThumbTexture()
+        if thumb then
+            thumb:SetColorTexture(1, 0.82, 0, 0.55)
+            thumb:SetSize(10, 32)
+        end
+        -- Drop the arrow buttons — they're 90s and look awful at this size
+        for _, suffix in ipairs({ 'ScrollUpButton', 'ScrollDownButton' }) do
+            local btn = _G['NCEListScrollScrollBar' .. suffix] or (_bar[suffix])
+            if btn then btn:Hide(); btn:SetSize(0.01, 0.01) end
+        end
+    end
 
     -- Mouse-wheel scrolling. FauxScrollFrameTemplate gives us a draggable bar
     -- but no wheel handler — and the row buttons are children of `f`, not of
@@ -255,6 +316,13 @@ function NCE:InitMobList()
         end
     end)
 
+    -- The creature model streams in asynchronously; if the camera is framed
+    -- before the model file finishes loading, the pedestal stays black/unframed.
+    -- Re-apply zoom / position / camera / facing the moment the model is ready.
+    model:SetScript('OnModelLoaded', function(self)
+        pcall(self.SetFacing, self, self.facing or 0.6)
+    end)
+
     -- Empty-state hint shown over the pedestal before anything is selected
     local empty = preview:CreateFontString(nil, 'OVERLAY', 'GameFontDisableLarge')
     empty:SetPoint('TOP', preview, 'TOP', 0, -(MODEL_H / 2) + 16)
@@ -266,6 +334,7 @@ function NCE:InitMobList()
     local spinBtn = CreateFrame('Button', nil, preview)
     spinBtn:SetSize(22, 22)
     spinBtn:SetPoint('TOPRIGHT', preview, 'TOPRIGHT', -4, -4)
+    spinBtn:SetFrameLevel((model:GetFrameLevel() or 0) + 10)  -- above the mouse-enabled model so the click lands
     spinBtn:SetNormalFontObject('GameFontNormalLarge')
     spinBtn:SetHighlightFontObject('GameFontHighlightLarge')
     spinBtn:SetText('|cffffd700o|r')
@@ -406,6 +475,9 @@ end
 function NCE:ClearPreview()
     local f = self.listFrame
     if not f then return end
+    -- Bump the debounce gen so any pending model load bails before touching
+    -- the now-hidden frame.
+    _modelLoadGen = _modelLoadGen + 1
     f.previewID = nil
     f.modelID   = nil
     if f.model then pcall(f.model.ClearModel, f.model); f.model:Hide() end
@@ -439,6 +511,7 @@ function NCE:RefreshPreviewStats(e)
         f.pvXp:Show()
     else
         f.pvXp:SetText('')
+        f.pvXp:Hide()
     end
 
     local thr = self.db.global.tracker.threshold or 0
@@ -457,8 +530,68 @@ function NCE:RefreshPreviewStats(e)
     end
 end
 
--- Full preview: load the creature model (only when the mob actually changes to
--- avoid reloading the model on every kill tick) and refresh the stats.
+-- Debounce token + delay for model loading. Rapid hover-scroll fires
+-- SetCreature() over and over while the previous one is still loading — the
+-- model frame can't keep up and ends up blank ("scrolled too fast, no picture").
+-- We coalesce: each PreviewMob bumps the gen, only the most-recent gen's
+-- scheduled callback actually runs SetCreature. Stats text refreshes
+-- immediately so the UI still feels responsive while scrolling.
+-- (_modelLoadGen / MODEL_LOAD_DEBOUNCE are declared at the top of the file so
+--  ClearPreview can see them — see the note there.)
+
+-- Actually load a creature model. After SetCreature, verify the model rendered
+-- (GetDisplayInfo > 0). On the rare silent failure — TWW occasionally drops
+-- model loads mid-scroll, or a deprecated NPC id has no cached model — retry
+-- once before giving up.
+-- Light the model explicitly: a patch after 12.0.5 makes the bare PlayerModel
+-- render black without a light set, even though SetCreature loads a valid model.
+-- Try the modern table form first; only fall back to the legacy positional form
+-- if that errors, so a working table light is never clobbered.
+function NCE:_applyModelLight(m)
+    local ok = pcall(m.SetLight, m, true, {
+        omnidirectional  = false,
+        point            = CreateVector3D and CreateVector3D(-1, 1, -1) or nil,
+        ambientIntensity = 1.0,
+        ambientColor     = CreateColor and CreateColor(0.9, 0.9, 0.9) or nil,
+        diffuseIntensity = 1.0,
+        diffuseColor     = CreateColor and CreateColor(1, 1, 1) or nil,
+    })
+    if not ok then
+        pcall(m.SetLight, m, true, false, -1, 1, -1, 1.0, 0.9, 0.9, 0.9, 1.0, 1, 1, 1)
+    end
+end
+
+-- On 12.0.7, PlayerModel:SetCreature(npcID) only RESOLVES the display — it no
+-- longer RENDERS the model inside a UI frame (verified: the pedestal was black
+-- while GetDisplayInfo/GetModelFileID returned valid non-zero values, and the
+-- game's own journals + RareScanner render fine). The path that actually draws
+-- on this patch is SetDisplayInfo(displayID) — which is exactly what RareScanner
+-- uses. We don't store display IDs, so we let SetCreature resolve one, read it
+-- via GetDisplayInfo (it populates a moment later — async), then render it with
+-- SetDisplayInfo.
+local function loadCreatureModel(m, npcId)
+    if not m then return end
+    pcall(m.ClearModel, m)
+    pcall(m.SetCreature, m, npcId)       -- resolve the display for this NPC id
+    local tries = 0
+    local function render()
+        local f = NCE.listFrame
+        if not f or f.modelID ~= npcId then return end   -- user scrolled away
+        local ok, did = pcall(m.GetDisplayInfo, m)
+        if ok and did and did > 0 then
+            pcall(m.SetDisplayInfo, m, did)              -- the call that renders
+            pcall(m.SetFacing, m, m.facing or 0.6)
+        elseif tries < 25 then
+            tries = tries + 1
+            C_Timer.After(0.08, render)                  -- ~2s of polling
+        end
+    end
+    render()
+end
+
+-- Hover/click handler. Stats update instantly; model load is debounced so a
+-- fast wheel-scroll past 30 rows only triggers one SetCreature (the last one)
+-- once the user pauses ~100ms.
 function NCE:PreviewMob(e)
     local f = self.listFrame
     if not f or not e then return end
@@ -466,21 +599,32 @@ function NCE:PreviewMob(e)
     if not f.pvName then return end
     if f.modelEmpty then f.modelEmpty:Hide() end
 
-    if f.modelID ~= e.id then
-        f.modelID = e.id
-        local m = f.model
-        m.facing   = 0.6
-        m.autospin = true
-        m:Show()
-        pcall(m.ClearModel, m)
-        pcall(m.SetCreature, m, e.id)
-        pcall(m.SetPortraitZoom, m, 0)
-        pcall(m.SetCamDistanceScale, m, m.cam or 1.0)
-        pcall(m.SetPosition, m, 0, 0, 0)
-        pcall(m.SetFacing, m, m.facing)
-    end
-    f.previewID = e.id
+    -- Stats text: instant, regardless of model state.
     self:RefreshPreviewStats(e)
+    f.previewID = e.id
+
+    -- Always bump the gen so any pending load for a different row that the
+    -- user has since scrolled past gets cancelled — even if they've now landed
+    -- back on the already-loaded row (where the early-return below would skip
+    -- scheduling a new load).
+    _modelLoadGen = _modelLoadGen + 1
+    local myGen = _modelLoadGen
+
+    -- Already showing this model? Stats are updated, nothing more to do.
+    if f.modelID == e.id then return end
+
+    local npcId = e.id
+    C_Timer.After(MODEL_LOAD_DEBOUNCE, function()
+        -- Superseded by a newer hover — skip this load.
+        if myGen ~= _modelLoadGen then return end
+        if not f.model then return end
+        f.modelID         = npcId
+        f.model.facing    = 0.6
+        -- Don't force autospin here — respect the 'o' toggle so it persists
+        -- across hovers/selections instead of snapping back on every preview.
+        f.model:Show()
+        loadCreatureModel(f.model, npcId, 1)
+    end)
 end
 
 -- ── Data ────────────────────────────────────────────────────────────────────
@@ -567,18 +711,52 @@ function NCE:RefreshRows()
             row.charLbl:SetText(self:commas(e.char))
             row.totalLbl:SetText(self:commas(e.total))
             row:Show()
+            -- Keep the selected row highlighted as the user scrolls (rows are reused).
+            if f.selectedID == e.id then
+                row.bg:SetColorTexture(1, 0.82, 0, 0.22)
+            else
+                row.bg:SetColorTexture(1, 1, 1, row.altRow and 0.03 or 0)
+            end
         else
             row.rowData = nil
             row:Hide()
         end
     end
-    local showing = math.min(#data, NUM_ROWS + offset)
+    local showing = math.max(0, math.min(#data - offset, NUM_ROWS))
     f.bottomLbl:SetText(string.format('Showing %d of %d entries', showing, #data))
+end
+
+-- Repaint every visible row's background to reflect the current f.selectedID
+-- (called on click so the gold "selected" highlight moves to the clicked row).
+function NCE:RefreshRowHighlights()
+    local f = self.listFrame
+    if not f or not f.rows then return end
+    for _, r in ipairs(f.rows) do
+        if r:IsShown() and r.rowData then
+            if f.selectedID == r.rowData.id then
+                r.bg:SetColorTexture(1, 0.82, 0, 0.22)
+            else
+                r.bg:SetColorTexture(1, 1, 1, r.altRow and 0.03 or 0)
+            end
+        end
+    end
 end
 
 function NCE:OpenList()
     local f = self.listFrame
     if not f then return end
-    if f:IsShown() then f:Hide()
-    else self:UpdateList(); f:Show() end
+    if f:IsShown() then f:Hide() return end
+    -- Always open sorted by Total (highest → lowest) with the top mob selected
+    -- so the pedestal shows something straight away.
+    f.sortKey = 'total'
+    f.sortAsc = false
+    self:UpdateList()
+    local top = f.data and f.data[1]
+    if top then
+        f.selectedID   = top.id
+        f.selectedData = top
+        self:PreviewMob(top)
+    end
+    f:Show()
+    self:RefreshRowHighlights()
 end

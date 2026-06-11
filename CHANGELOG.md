@@ -1,5 +1,34 @@
 # nocat.extension Changelog
 
+## 1.2.1 — 2026-06-11
+
+### Fixed
+- **Bestiary 3D models now render.** `_modelLoadGen` was declared *after* the
+  `ClearPreview` function that uses it, so during pedestal setup it hit a nil
+  global and `nil + 1` threw — the whole model frame got discarded and the
+  pedestal stayed black. Declared it at the top of the file.
+- **Pet auto-summon no longer silently fails.** `summonBlocker` called
+  `UnitIsControlling`, which isn't a real API on 12.0.x — it threw inside the
+  summon ticker (no visible error) and aborted every auto-summon. Nil-guarded.
+- **Model rendering** uses `SetDisplayInfo` (resolved from the NPC id) instead
+  of `SetCreature`, which stopped drawing in UI frames on 12.0.7.
+- The auto-spin **`o`** button works again — it sat under the mouse-enabled
+  model frame so clicks never reached it (raised its frame level), and the
+  toggle now persists instead of resetting to ON on every preview.
+- Guarded `C_UnitAuras`, tracked the pet safety-net ticker, fixed the
+  "Showing X of Y" count, and hid a stale XP line in the preview.
+
+### Changed
+- **Pet & Weapon now activate anywhere it's possible.** The pet auto-summons in
+  every valid state (flying, resting, cities, …) — only combat, vehicles, death,
+  secure frames, **stealth/invisibility** (so it won't blow your cover), and
+  "already out" hold it back. The weapon also draws everywhere (resting / being
+  in a city no longer blocks it).
+- **Click-to-select** in the Bestiary: clicking a row pins it with a gold
+  highlight that persists as you scroll; hovering is a temporary peek that snaps
+  back to your selection. Opening the list always sorts by Total (high → low)
+  and auto-selects the top mob so the pedestal shows it immediately.
+
 ## 1.2.0 — 2026-06-02
 
 ### Bestiary — the mob database is now a trophy room
