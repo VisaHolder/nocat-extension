@@ -1,0 +1,34 @@
+# Standard WoW-addon release pipeline (BigWigs packager).
+# Push a version tag and this builds the drag-and-drop zip and publishes a
+# GitHub release automatically — no manual zipping.
+#
+#   git tag v1.2.2
+#   git push origin v1.2.2
+#
+# The zip is named nocat.extension-<tag>.zip and contains the nocat.extension/
+# folder, so users just unzip it into Interface\AddOns\.
+#
+# To also publish to CurseForge later: add a CF_API_KEY repo secret and a
+# `## X-Curse-Project-ID:` line to nocat.extension.toc, then uncomment CF_API_KEY.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Package and publish release
+        uses: BigWigsMods/packager@v2
+        env:
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          # CF_API_KEY: ${{ secrets.CF_API_KEY }}
