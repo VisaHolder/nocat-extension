@@ -6,14 +6,13 @@
 
 Lua · Ace3 · The War Within (12.0.x)
 
-<img src="docs/bestiary.png" alt="nocat Bestiary — live 3D mob model + kill stats" width="820"/>
-
 </div>
 
 ---
 
 > **Personal addon.** Built piece-by-piece every time something in WoW bugged me.
-> Not on Curse / Wago — runs locally only. Source mirrored here for safekeeping.
+> Not on Curse / Wago — grab the latest drag-and-drop build from
+> [Releases](../../releases/latest), or clone the source below.
 
 ---
 
@@ -93,19 +92,24 @@ nocat.extension/
 ├── Command.lua              # /nocat slash command dispatcher
 ├── CHANGELOG.md
 ├── LICENSE                  # MIT
-├── docs/                    # Screenshots used by this README
+├── docs/                    # Screenshots (optional)
 └── libs/                    # Bundled Ace3 + LDB + LDBI (no externals)
 ```
 
 ## Install
 
-Drop the `nocat.extension/` folder (the one containing `nocat.extension.toc`) into:
+Download the latest **`nocat.extension-x.y.z.zip`** from [Releases](../../releases/latest)
+and unzip it, then drop the `nocat.extension/` folder (the one containing
+`nocat.extension.toc`) into:
 
 ```
 World of Warcraft/_retail_/Interface/AddOns/
 ```
 
 …then `/reload` or restart the client. The minimap cat-face icon means it loaded.
+
+> Prefer to clone? The repo root *is* the `nocat.extension/` folder — clone it
+> straight into `AddOns/nocat.extension/`.
 
 ---
 
@@ -224,8 +228,16 @@ Stored globally (shared across characters) with a per-character mirror for char-
 
 ---
 
-## Updating this repo
+## Releasing a new version
+
+Bump `## Version:` in `nocat.extension.toc`, add a `CHANGELOG.md` entry, then tag:
 
 ```bash
-git add -A && git commit -m "vX.Y.Z release notes" && git push
+git commit -am "vX.Y.Z release notes"
+git tag vX.Y.Z
+git push origin main --tags
 ```
+
+Pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml)
+(BigWigs packager), which builds `nocat.extension-vX.Y.Z.zip` and publishes the
+GitHub release automatically — no manual zipping.
