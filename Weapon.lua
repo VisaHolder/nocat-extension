@@ -66,6 +66,10 @@ local function unsheatheBlocker()
     if UnitInVehicle('player')                       then return 'in a vehicle' end
     if IsMounted()                                   then return 'mounted' end
     if IsSwimming() and GetUnitSpeed('player') > 0   then return 'swimming' end
+    -- AFK forces a sit/sleep animation that stows the weapon. Don't fight it
+    -- (drawing every tick just flickers and escalates the force-sheathed backoff)
+    -- — we re-draw on PLAYER_FLAGS_CHANGED when the AFK flag clears on return.
+    if UnitIsAFK and UnitIsAFK('player')             then return 'AFK (re-draws on return)' end
     -- Draw anywhere it's technically possible: resting / being in a city no longer
     -- blocks (a drawn weapon is perfectly valid there). Only the states where the
     -- weapon genuinely can't show drawn gate it (combat, mounted, swim-moving,
@@ -208,6 +212,13 @@ local EVENTS = {
     -- Resting flag flipping (entering/leaving inns) often coincides with a
     -- silent re-sheathe; cheap to recheck.
     'PLAYER_UPDATE_RESTING',
+    -- AFK flag set/cleared. Coming back from AFK clears the flag → this fires →
+    -- the OnEvent handler resets the (escalated-while-AFK) backoff and re-draws.
+    'PLAYER_FLAGS_CHANGED',
+    -- The universal "you're active again" signal. Moving after ANY interaction
+    -- (NPC frame, chair, AFK, channel, toy) re-draws the weapon and clears any
+    -- escalated backoff — so it's out the moment you walk away from anything.
+    'PLAYER_STARTED_MOVING',
 }
 
 function NCE:InitWeapon()

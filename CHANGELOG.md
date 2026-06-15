@@ -1,5 +1,33 @@
 # nocat.extension Changelog
 
+## 1.3.0 — 2026-06-15
+
+### Added — Grind HUD
+- A new live efficiency overlay (`/nocat hud`, or the **Grind HUD** button on the
+  Kill Tracker page). Shows **session time, kills + kills/hr, XP/hr, gold/hr, and
+  free bag slots**, plus an **XP-to-next-level bar** with a live **ETA to your next
+  level** (e.g. `XP 112,311 / 115,443 · Lv 71 in ~14m`). Draggable, position saved,
+  starts a fresh session each time you open it. At max level the XP bar hides and
+  the panel crops to fit.
+- **Bags** row turns red when you're nearly full, so you notice before you're stuck.
+- **Farm goals** — `/nocat goal <count> <mob>` (or target a mob and `/nocat goal
+  <count>`) sets a goal that counts kills of *that specific mob* from the moment you
+  set it, with a gold progress bar + live ETA on the HUD. `/nocat goal clear` cancels.
+- It's cheap: the per-frame sampler only runs while the HUD is shown, ticking
+  every 0.5s. It reads `UnitXP`/`GetMoney` directly rather than registering
+  `PLAYER_XP_UPDATE` (ExpTracker already owns that event), so the two stay
+  decoupled. Kills are fed by the existing kill callback, so they're exact.
+
+### Fixed — Weapon unsheathe
+- Your weapon now re-draws after **every** interaction (looting, mailbox, vendor,
+  questgiver, etc.) instead of sometimes being left sheathed.
+- Fixed the weapon staying sheathed after an **AFK auto-sit** — returning from AFK
+  now re-draws it.
+
+### Fixed
+- The options panel footer now reads the version from the `.toc` instead of a
+  hard-coded string (it was stuck showing `v1.2.0`).
+
 ## 1.2.2 — 2026-06-11
 
 ### Housekeeping

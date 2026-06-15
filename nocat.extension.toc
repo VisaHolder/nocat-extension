@@ -2,7 +2,7 @@
 ## Title: nocat.extension
 ## Author: paul
 ## SavedVariables: NocatExtensionDB
-## Version: 1.2.2
+## Version: 1.3.0
 
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
@@ -19,6 +19,7 @@ MobList.lua
 Timer.lua
 ImmediateFrame.lua
 ExpTracker.lua
+GrindHUD.lua
 
 Options.lua
 MinimapButton.lua

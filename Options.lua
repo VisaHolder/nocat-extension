@@ -340,6 +340,7 @@ function NCE:InitOptions()
             }
             StaticPopup_Show('NCE_RESET')
         end)
+    makeBtn(pgT, 'Grind HUD', 'Toggle the live grind HUD: kills, XP and gold per hour plus an XP-to-next-level bar. Starts a fresh session each time you open it.',  100, 4, -468, function() NCE:ToggleGrindHUD() end)
 
     -- ── PAGE: Pet Companion ───────────────────────────────────────────────────
     local pgP = makePage()
@@ -565,7 +566,9 @@ function NCE:InitOptions()
 
     local ver = panel:CreateFontString(nil, 'OVERLAY', 'GameFontDisableSmall')
     ver:SetPoint('BOTTOMLEFT', 14, 12)
-    ver:SetText('v1.2.0')
+    -- Read the version straight from the .toc so this footer never goes stale.
+    local meta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    ver:SetText('v' .. ((meta and meta('nocat.extension', 'Version')) or '?'))
 
     -- Sync state on open
     panel:SetScript('OnShow', function()

@@ -64,6 +64,9 @@ function NCE:SlashHelp()
         '  list                     — open mob database',
         '  timer <dur>              — start kill timer  (5m / 3m30s / 90)',
         '  stop                     — stop timer',
+        '  hud                      — toggle the live grind HUD (kills/XP/gold per hour)',
+        '  goal <count> [mob]       — set a farm goal (omit mob to use your target)',
+        '  goal clear               — cancel the farm goal',
         '  imm                      — toggle instant kill counter',
         '  imm threshold <N>        — alert every N kills',
         '  imm filter <pattern>     — only count matching mob names',
@@ -182,6 +185,22 @@ local function dispatch(input)
 
     elseif cmd == 'stop' then
         NCE:StopTimer()
+
+    elseif cmd == 'hud' or cmd == 'grind' then
+        NCE:ToggleGrindHUD()
+
+    elseif cmd == 'goal' or cmd == 'farm' then
+        local sub = (args[1] or ''):lower()
+        if sub == 'clear' or sub == 'off' or sub == 'cancel' or sub == 'stop' then
+            NCE:ClearGoal()
+        elseif sub == '' then
+            NCE:Msg('Usage: /nocat goal <count> [mob name or id]   (omit the mob to use your target)')
+            NCE:Msg('       /nocat goal clear   to cancel')
+        else
+            local count = tonumber(args[1])
+            local who   = table.concat(args, ' ', 2)   -- mob name/id after the count; '' = use current target
+            NCE:SetGoal(count, who ~= '' and who or nil)
+        end
 
     elseif cmd == 'imm' or cmd == 'immediate' or cmd == 'i' then
         if #args == 0 then

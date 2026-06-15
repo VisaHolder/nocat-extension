@@ -43,6 +43,10 @@ local DB_DEFAULTS = {
             -- flips drawn/sheathed and the game picks the weapon.
             stance   = 'drawn',
         },
+        -- Grind HUD (live efficiency overlay)
+        hud = {
+            position = {},
+        },
         loadmessage   = false,
         firstLoad     = true,
         minimapAngle  = nil,
@@ -274,6 +278,7 @@ function NCE:OnInitialize()
     _runInit('Timer',         NCE.InitTimer)
     _runInit('Immediate',     NCE.InitImmediate)
     _runInit('ExpTracker',    NCE.InitExpTracker)
+    _runInit('GrindHUD',      NCE.InitGrindHUD)
     _runInit('Options',       NCE.InitOptions)
     _runInit('MinimapButton', NCE.InitMinimapButton)
 
